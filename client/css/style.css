@@ -1,0 +1,430 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background: #1a1a2e;
+  color: #eee;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#app {
+  width: 100%;
+  max-width: 800px;
+  margin: 20px;
+  background: #16213e;
+  border-radius: 10px;
+  padding: 30px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.screen {
+  display: none;
+}
+
+.screen.active {
+  display: block;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 30px;
+  color: #e94560;
+}
+
+.menu {
+  text-align: center;
+}
+
+button {
+  background: #e94560;
+  color: white;
+  border: none;
+  padding: 12px 30px;
+  font-size: 16px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin: 10px;
+  transition: background 0.3s;
+}
+
+button:hover {
+  background: #d63851;
+}
+
+button:disabled {
+  background: #666;
+  cursor: not-allowed;
+}
+
+input {
+  padding: 12px;
+  font-size: 16px;
+  border: 2px solid #0f3460;
+  border-radius: 5px;
+  background: #1a1a2e;
+  color: white;
+  width: 200px;
+  margin: 10px;
+}
+
+input:focus {
+  outline: none;
+  border-color: #e94560;
+}
+
+.username-form {
+  margin-top: 30px;
+  text-align: center;
+}
+
+.divider {
+  margin: 20px 0;
+  color: #666;
+}
+
+.game-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px;
+  background: #0f3460;
+  border-radius: 5px;
+  margin-bottom: 20px;
+}
+
+.players-container {
+  margin: 20px 0;
+}
+
+#players-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.player-item {
+  background: #0f3460;
+  padding: 10px;
+  border-radius: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.player-item.host::after {
+  content: "👑";
+  margin-left: 5px;
+}
+
+.error {
+  color: #e94560;
+  text-align: center;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+/* Add to existing CSS */
+#game-play-area {
+  margin-top: 20px;
+}
+
+#hand-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0;
+  min-height: 100px;
+}
+
+.card {
+  background: white;
+  color: black;
+  padding: 15px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: bold;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  transition: transform 0.2s;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+}
+
+.card.hearts, .card.diamonds {
+  color: red;
+}
+
+.card.clubs, .card.spades {
+  color: black;
+}
+
+#current-trick {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+  min-height: 80px;
+}
+
+#guess-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.guess-btn {
+  min-width: 50px;
+}
+
+#trump-controls button {
+  margin: 5px;
+}
+
+#scoreboard {
+  overflow-x: auto;
+  margin: 20px 0;
+}
+
+#scoreboard table,
+#final-scoreboard table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #0f3460;
+}
+
+#scoreboard th, 
+#scoreboard td,
+#final-scoreboard th, 
+#final-scoreboard td {
+  padding: 10px;
+  text-align: center;
+  border: 1px solid #1a1a2e;
+}
+
+#scoreboard th,
+#final-scoreboard th {
+  background: #e94560;
+}
+
+.create-options {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.create-options label {
+  color: #eee;
+  font-size: 14px;
+}
+
+#max-cards-input {
+  width: 200px;
+  text-align: center;
+}
+
+#max-cards-input::placeholder {
+  color: #888;
+  font-size: 12px;
+}
+
+.turn-indicator {
+  text-align: center;
+  padding: 10px;
+  margin: 10px 0;
+  font-size: 18px;
+  font-weight: bold;
+  background: #0f3460;
+  border-radius: 5px;
+}
+
+.trick-winner {
+  display: none;
+  text-align: center;
+  padding: 15px;
+  margin: 10px 0;
+  font-size: 20px;
+  font-weight: bold;
+  background: #e94560;
+  color: white;
+  border-radius: 5px;
+  animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.lobby-container {
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.name-section {
+  margin-bottom: 25px;
+}
+
+.name-section label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #eee;
+}
+
+.name-section input {
+  width: 100%;
+  margin: 0;
+}
+
+.join-section {
+  margin-bottom: 20px;
+}
+
+.join-section label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #eee;
+}
+
+.join-row {
+  display: flex;
+  gap: 10px;
+}
+
+.join-row input {
+  flex: 1;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.join-row button {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.create-section {
+  margin-top: 20px;
+}
+
+.create-section label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #eee;
+}
+
+.create-row {
+  display: flex;
+  gap: 10px;
+}
+
+.create-row input {
+  flex: 1;
+  margin: 0;
+}
+
+.create-row button {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.divider {
+  text-align: center;
+  margin: 20px 0;
+  color: #888;
+  font-style: italic;
+}
+
+.new-game-options {
+  margin-bottom: 15px;
+}
+
+.new-game-options label {
+  display: block;
+  margin-bottom: 5px;
+  color: #eee;
+  font-size: 14px;
+}
+
+.new-game-options input {
+  width: 200px;
+  text-align: center;
+}
+
+.ready-status {
+  margin-top: 15px;
+  padding: 10px;
+  text-align: center;
+  font-size: 14px;
+  border-radius: 5px;
+  background: #0f3460;
+  color: #FFA500;
+  font-style: italic;
+}
+
+#scoreboard-container {
+  margin: 20px 0;
+  padding: 15px;
+  background: #0f3460;
+  border-radius: 8px;
+}
+
+#scoreboard-container h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #e94560;
+}
+
+#ready-controls {
+  margin-top: 20px;
+  text-align: center;
+}
+
+#ready-status {
+  margin-top: 10px;
+}
+
+.guesses-display {
+  background: #0f3460;
+  padding: 15px;
+  border-radius: 8px;
+  margin: 15px 0;
+}
+
+.guesses-display h4 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #e94560;
+}
+
+#guesses-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.guess-item {
+  background: #16213e;
+  padding: 8px 12px;
+  border-radius: 5px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.guess-item.waiting {
+  color: #888;
+  font-style: italic;
+  background: #1a1a2e;
+}

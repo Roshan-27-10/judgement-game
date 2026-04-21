@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Judgement Card Game</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Lobby Screen -->
+    <div id="lobby-screen" class="screen active">
+      <h1>🎮 Judgement</h1>
+      
+      <div class="lobby-container">
+        <!-- Name Section -->
+        <div class="name-section">
+          <label for="username-input">Your Name:</label>
+          <input type="text" id="username-input" placeholder="Enter your name" maxlength="20">
+        </div>
+
+        <!-- Join Room Section -->
+        <div class="join-section">
+          <label for="room-code-input">Room Code:</label>
+          <div class="join-row">
+            <input type="text" id="room-code-input" placeholder="Enter 4-letter code" maxlength="4">
+            <button id="join-room-btn">Join Room</button>
+          </div>
+        </div>
+
+        <div class="divider">— OR —</div>
+
+        <!-- Create Room Section -->
+        <div class="create-section">
+          <label for="max-cards-input">Max Cards per Round:</label>
+          <div class="create-row">
+            <input type="number" id="max-cards-input" min="1" max="26" placeholder="(optional)">
+            <button id="create-room-btn">Create New Room</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="game-screen" class="screen">
+      <div class="game-header">
+        <div class="room-info">
+          Room: <span id="room-code-display"></span>
+        </div>
+        <div class="phase-info">
+          Phase: <span id="phase-display"></span>
+        </div>
+      </div>
+
+      <div class="players-container">
+        <h3>Players</h3>
+        <div id="players-list"></div>
+      </div>
+
+      <div class="game-controls">
+        <button id="start-game-btn" style="display: none;">Start Game</button>
+      </div>
+
+      <!-- Always visible scoreboard -->
+      <div id="scoreboard-container" style="display: none;">
+        <h3>Scoreboard</h3>
+        <div id="scoreboard"></div>
+      </div>
+
+      <!-- Game Play Area -->
+      <div id="game-play-area" style="display: none;">
+        <!-- Add this in game-play-area, after round-info -->
+        <div id="guesses-display" class="guesses-display" style="display: none;">
+          <h4>Round Guesses</h4>
+          <div id="guesses-list"></div>
+        </div>
+        
+        <div class="round-info">
+          <h3>Round <span id="round-number"></span></h3>
+          <p>Cards this round: <span id="cards-this-round"></span></p>
+          <p>Trump: <span id="trump-display"></span></p>
+        </div>
+
+        <div id="turn-indicator" class="turn-indicator"></div>
+        <div id="trick-winner-display" class="trick-winner" style="display: none;"></div>
+
+        <div id="hand-container">
+          <h4>Your Hand</h4>
+          <div id="hand-cards"></div>
+        </div>
+
+        <div id="trick-container">
+          <h4>Current Trick</h4>
+          <div id="current-trick"></div>
+        </div>
+
+        <div id="guess-controls" style="display: none;">
+          <h4>Make Your Guess</h4>
+          <div id="guess-buttons"></div>
+        </div>
+
+        <div id="trump-controls" style="display: none;">
+          <h4>Select Trump</h4>
+          <button data-suit="clubs">♣ Clubs</button>
+          <button data-suit="hearts">♥ Hearts</button>
+          <button data-suit="spades">♠ Spades</button>
+          <button data-suit="diamonds">♦ Diamonds</button>
+        </div>
+
+        <!-- Ready button for scoreboard phase -->
+        <div id="ready-controls" style="display: none;">
+          <button id="ready-next-round">Ready for Next Round</button>
+          <div id="ready-status" class="ready-status"></div>
+        </div>
+
+        <div id="vote-controls" style="display: none;">
+          <h4>Continue Playing?</h4>
+          <button id="vote-continue">Yes</button>
+          <button id="vote-stop">No</button>
+        </div>
+
+        <div id="ended-container" style="display: none;">
+          <h3>Game Over!</h3>
+          <div id="winner-display"></div>
+          <div id="final-scoreboard"></div>
+          <div id="end-game-controls">
+            <div class="new-game-options">
+              <label for="new-game-max-cards">Max Cards per Round (optional):</label>
+              <input type="number" id="new-game-max-cards" min="1" max="26" placeholder="(Keep current)">
+            </div>
+            <button id="new-game-btn" style="display: none;">New Game</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="error-message" class="error"></div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/socket.js"></script>
+  <script src="/js/ui.js"></script>
+</body>
+</html>
