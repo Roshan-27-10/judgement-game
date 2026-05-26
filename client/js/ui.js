@@ -161,7 +161,9 @@ function showError(message) {
 function updateGamePlayUI(state) {
   roundNumber.textContent = state.roundNumber;
   cardsThisRound.textContent = state.cardsThisRound;
-  trumpDisplay.textContent = state.trump || 'Not selected';
+  
+  // Update trump display with selector info
+  updateTrumpDisplay(state);
   
   // Find current player
   const currentPlayer = state.players.find(p => p.id === currentPlayerId);
@@ -179,7 +181,7 @@ function updateGamePlayUI(state) {
     });
   }
   
-  // Update current trick - show either current or completed trick
+  // Update current trick
   currentTrick.innerHTML = '';
   const trickToShow = state.completedTrick && state.completedTrick.length > 0 
     ? state.completedTrick 
@@ -190,7 +192,7 @@ function updateGamePlayUI(state) {
       const player = state.players.find(p => p.id === play.playerId);
       const cardDiv = document.createElement('div');
       cardDiv.className = `card ${play.card.suit}`;
-      cardDiv.textContent = `${player.name}: ${play.card.rank} ${getSuitSymbol(play.card.suit)}`;
+      cardDiv.textContent = `${player ? player.name : 'Unknown'}: ${play.card.rank} ${getSuitSymbol(play.card.suit)}`;
       currentTrick.appendChild(cardDiv);
     });
   }
@@ -206,47 +208,23 @@ function updateGamePlayUI(state) {
   // Handle vote controls
   if (state.phase === 'vote') {
     voteControls.style.display = 'block';
-    // Reset button states when entering vote phase
     document.getElementById('vote-continue').disabled = false;
     document.getElementById('vote-stop').disabled = false;
     
-    // Hide if already voted
     if (state.continueVotes && state.continueVotes[currentPlayerId] !== undefined) {
       voteControls.style.display = 'none';
     }
-
   } else {
     voteControls.style.display = 'none';
   }
 
   endedContainer.style.display = state.phase === 'ended' ? 'block' : 'none';
   
-  // Hide hand and trick during ended phase
   document.getElementById('hand-container').style.display = state.phase === 'ended' ? 'none' : 'block';
   document.getElementById('trick-container').style.display = state.phase === 'ended' ? 'none' : 'block';
 
-  // Update turn indicator
-  if (state.phase === 'playing') {
-    // Hide turn indicator if trick is complete (waiting to resolve)
-    if (state.completedTrick && state.completedTrick.length > 0) {
-      turnIndicator.style.display = 'none';
-    } else {
-      // Calculate whose turn it is
-      const currentPlayerIndex = (state.trickLeaderIndex + state.currentTrick.length) % state.players.length;
-      const turnPlayer = state.players[currentPlayerIndex];
-      
-      if (turnPlayer && turnPlayer.id === currentPlayerId) {
-        turnIndicator.textContent = "🎮 YOUR TURN!";
-        turnIndicator.style.color = "#4CAF50";
-      } else if (turnPlayer) {
-        turnIndicator.textContent = `🎮 ${turnPlayer.name}'s turn...`;
-        turnIndicator.style.color = "#eee";
-      }
-      turnIndicator.style.display = 'block';
-    }
-  } else {
-    turnIndicator.style.display = 'none';
-  }
+  // Update turn indicator with better styling
+  updateTurnIndicator(state);
   
   // Update guess buttons
   if (state.phase === 'guessing') {
@@ -281,16 +259,180 @@ function updateGamePlayUI(state) {
     readyControls.style.display = 'none';
   }
   
-  // Update scoreboard
   if (state.phase === 'scoreboard' || state.phase === 'vote' || state.phase === 'ended') {
     updateScoreboard(state);
   }
 
-  // Update ended screen
   if (state.phase === 'ended') {
     updateEndedScreen(state);
   }
+  
+  // Highlight current guesser and trump selector in players list
+  updatePlayerHighlights(state);
+}
 
+// New function to update trump display with selector info
+function updateTrumpDisplay(state) {
+  if (!trumpDisplay) return;
+  
+  if (state.trump) {
+    const trumpSymbol = getSuitSymbol(state.trump);
+    const trumpText = `${state.trump.charAt(0).toUpperCase() + state.trump.slice(1)} ${trumpSymbol}`;
+    
+    // Find who selected trump
+    const trumpSelector = state.players.find(p => p.id === state.trumpSelectPlayerId);
+    
+    if (trumpSelector && state.phase === 'trump_select') {
+      trumpDisplay.innerHTML = `${trumpText} <span class="trump-indicator">🎯 ${trumpSelector.name} is choosing...</span>`;
+    } else if (trumpSelector && state.trump) {
+      trumpDisplay.innerHTML = `${trumpText} <span class="trump-selector-name">(selected by ${trumpSelector.name})</span>`;
+    } else {
+      trumpDisplay.textContent = trumpText;
+    }
+  } else {
+    if (state.trumpSelectPlayerId && state.phase === 'trump_select') {
+      const selector = state.players.find(p => p.id === state.trumpSelectPlayerId);
+      trumpDisplay.innerHTML = `Not selected yet <span class="trump-indicator">🎯 ${selector ? selector.name : 'Player'} choosing...</span>`;
+    } else {
+      trumpDisplay.textContent = 'Not selected';
+    }
+  }
+}
+
+// New function to update turn indicator with better styling
+function updateTurnIndicator(state) {
+  if (state.phase !== 'playing') {
+    turnIndicator.style.display = 'none';
+    return;
+  }
+  
+  // Hide turn indicator if trick is complete
+  if (state.completedTrick && state.completedTrick.length > 0) {
+    turnIndicator.style.display = 'none';
+    return;
+  }
+  
+  // Calculate whose turn it is
+  const currentPlayerIndex = (state.trickLeaderIndex + state.currentTrick.length) % state.players.length;
+  const turnPlayer = state.players[currentPlayerIndex];
+  
+  if (turnPlayer && turnPlayer.id === currentPlayerId) {
+    turnIndicator.textContent = "🎮 YOUR TURN!";
+    turnIndicator.className = "turn-indicator your-turn";
+  } else if (turnPlayer) {
+    turnIndicator.textContent = `🎮 ${turnPlayer.name}'s turn...`;
+    turnIndicator.className = "turn-indicator waiting";
+  }
+  turnIndicator.style.display = 'block';
+}
+
+// New function to highlight current guesser and trump selector
+function updatePlayerHighlights(state) {
+  const playersList = document.getElementById('players-list');
+  if (!playersList) return;
+  
+  // Get all player items
+  const playerItems = playersList.children;
+  
+  // Remove all existing highlight classes
+  for (let i = 0; i < playerItems.length; i++) {
+    playerItems[i].classList.remove('current-guesser', 'trump-selector');
+  }
+  
+  // Highlight current guesser during guessing phase
+  if (state.phase === 'guessing') {
+    const currentGuesser = state.players[state.guessingCursor];
+    if (currentGuesser) {
+      for (let i = 0; i < playerItems.length; i++) {
+        if (playerItems[i].textContent.includes(currentGuesser.name)) {
+          playerItems[i].classList.add('current-guesser');
+          break;
+        }
+      }
+    }
+  }
+  
+  // Highlight trump selector during trump selection and playing phases
+  if ((state.phase === 'trump_select' || state.phase === 'playing') && state.trumpSelectPlayerId) {
+    const trumpSelector = state.players.find(p => p.id === state.trumpSelectPlayerId);
+    if (trumpSelector) {
+      for (let i = 0; i < playerItems.length; i++) {
+        if (playerItems[i].textContent.includes(trumpSelector.name)) {
+          playerItems[i].classList.add('trump-selector');
+          break;
+        }
+      }
+    }
+  }
+}
+
+// Modified updateGuessButtons to show clearer who's guessing
+function updateGuessButtons(state) {
+  guessButtons.innerHTML = '';
+  const currentPlayer = state.players.find(p => p.id === currentPlayerId);
+  const currentGuesser = state.players[state.guessingCursor];
+  const isMyTurn = currentGuesser && currentGuesser.id === currentPlayerId;
+  
+  // Add info text about who is guessing
+  if (!isMyTurn && currentGuesser) {
+    const waitingDiv = document.createElement('div');
+    waitingDiv.className = 'waiting-info';
+    waitingDiv.innerHTML = `<p>⏳ Waiting for <strong>${currentGuesser.name}</strong> to guess...</p>`;
+    waitingDiv.style.padding = '10px';
+    waitingDiv.style.background = '#0f3460';
+    waitingDiv.style.borderRadius = '5px';
+    waitingDiv.style.textAlign = 'center';
+    guessButtons.appendChild(waitingDiv);
+  }
+  
+  if (isMyTurn && currentPlayer.guess === null) {
+    const guessInfo = document.createElement('p');
+    guessInfo.textContent = `How many tricks will you win? (0-${state.cardsThisRound})`;
+    guessInfo.style.marginBottom = '10px';
+    guessInfo.style.fontWeight = 'bold';
+    guessButtons.appendChild(guessInfo);
+    
+    for (let i = 0; i <= state.cardsThisRound; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'guess-btn';
+      btn.textContent = i;
+      btn.addEventListener('click', () => {
+        socket.emit('submit_guess', { guess: i }, (response) => {
+          if (response && response.error) {
+            showError(response.error);
+          }
+        });
+      });
+      guessButtons.appendChild(btn);
+    }
+  } else if (isMyTurn && currentPlayer.guess !== null) {
+    guessButtons.innerHTML = '<p>✅ You have already guessed!</p>';
+  } else if (!isMyTurn && !currentGuesser) {
+    guessButtons.innerHTML = '<p>Waiting for guesses...</p>';
+  }
+}
+
+// Also update the guesses list to show current guesser
+function updateGuessesList(state) {
+  if (!guessesList) return;
+  
+  let html = '';
+  
+  state.players.forEach(player => {
+    const isCurrentGuesser = state.phase === 'guessing' && state.guessingCursor !== null && 
+                            state.players[state.guessingCursor] && 
+                            state.players[state.guessingCursor].id === player.id;
+    
+    const guessText = player.guess !== null ? player.guess : '?';
+    const guessClass = player.guess !== null ? '' : 'waiting';
+    const currentMarker = isCurrentGuesser ? ' 🎯' : '';
+    
+    html += `<div class="guess-item ${guessClass}">
+      ${player.name}: ${guessText}${currentMarker}
+    </div>`;
+  });
+  
+  guessesList.innerHTML = html;
 }
 
 function updateReadyStatus(state) {

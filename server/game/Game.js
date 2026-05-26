@@ -8,7 +8,7 @@ class Game {
     this.players = [];
     this.phase = 'lobby';
     this.roundNumber = 0;
-    this.customX = customX; // Store custom X if provided
+    this.customX = customX;
     this.x = 0;
     this.roundSequenceIndex = 0;
     this.cardsThisRound = 0;
@@ -22,13 +22,13 @@ class Game {
     this.tricksWon = {};
     this.continueVotes = {};
     this.viewingScoreboard = new Set();
-    this.lastTrickWinner = null; // Add this line
-    this.completedTrick = null; // Add this line
+    this.lastTrickWinner = null;
+    this.completedTrick = null;
+    this.disconnectedPlayers = new Map(); // Track disconnected players with timeout
   }
 
   recalculateX() {
     if (this.customX) {
-      // Use custom X if set, but cap at 52 / players
       const maxPossible = Math.floor(52 / Math.max(1, this.players.length));
       this.x = Math.min(this.customX, maxPossible);
     } else {
@@ -63,24 +63,123 @@ class Game {
   }
 
   removePlayer(socketId) {
+    const player = this.players.find(p => p.id === socketId);
+    if (!player) return null;
+    
+    // If game not started or ended, remove completely
+    if (this.phase === 'lobby' || this.phase === 'ended') {
+      const index = this.players.findIndex(p => p.id === socketId);
+      this.players.splice(index, 1);
+      
+      if (this.host === socketId && this.players.length > 0) {
+        this.host = this.players[0].id;
+      }
+      
+      this.recalculateX();
+      return player;
+    }
+    
+    // Game in progress - mark as disconnected with timeout
+    player.connected = false;
+    player.disconnectTime = Date.now();
+    
+    // Store timeout for auto-removal (60 seconds)
+    const timeout = setTimeout(() => {
+      this.permanentlyRemovePlayer(socketId);
+    }, 60000);
+    
+    this.disconnectedPlayers.set(socketId, timeout);
+    
+    return player;
+  }
+
+  permanentlyRemovePlayer(socketId) {
     const index = this.players.findIndex(p => p.id === socketId);
-    if (index === -1) return null;
+    if (index === -1) return;
+    
+    // Clear timeout if exists
+    if (this.disconnectedPlayers.has(socketId)) {
+      clearTimeout(this.disconnectedPlayers.get(socketId));
+      this.disconnectedPlayers.delete(socketId);
+    }
     
     const removed = this.players[index];
     this.players.splice(index, 1);
+    
+    // If game in progress, handle abandonment
+    if (this.phase !== 'lobby' && this.phase !== 'ended') {
+      this.handlePlayerAbandonment();
+    }
     
     if (this.host === socketId && this.players.length > 0) {
       this.host = this.players[0].id;
     }
     
     this.recalculateX();
+  }
+
+  handlePlayerAbandonment() {
+    const activePlayers = this.players.filter(p => p.connected);
     
-    // If game in progress, mark as disconnected
-    if (this.phase !== 'lobby') {
-      removed.connected = false;
+    // If less than 2 players left, end the game
+    if (activePlayers.length < 2) {
+      this.phase = 'ended';
+      return;
     }
     
-    return removed;
+    // If it's the disconnected player's turn during guessing phase
+    if (this.phase === 'guessing') {
+      const currentPlayer = this.players[this.guessingCursor];
+      if (currentPlayer && !currentPlayer.connected) {
+        // Auto-submit a random guess for disconnected player
+        const randomGuess = Math.floor(Math.random() * (this.cardsThisRound + 1));
+        this.submitGuess(currentPlayer.id, randomGuess);
+      }
+    }
+    
+    // If it's the disconnected player's turn during playing phase
+    if (this.phase === 'playing' && this.currentTrick.length < this.players.length) {
+      const expectedPlayerIndex = (this.trickLeaderIndex + this.currentTrick.length) % this.players.length;
+      const expectedPlayer = this.players[expectedPlayerIndex];
+      if (expectedPlayer && !expectedPlayer.connected) {
+        // Auto-play the first legal card
+        const ledSuit = this.currentTrick.length > 0 ? this.currentTrick[0].card.suit : null;
+        const legalCards = getLegalCards(expectedPlayer.hand, ledSuit);
+        if (legalCards.length > 0) {
+          this.playCard(expectedPlayer.id, legalCards[0]);
+        }
+      }
+    }
+  }
+
+  reconnectPlayer(oldSocketId, newSocketId, username) {
+    // Try to find player by old ID first
+    let player = this.players.find(p => p.id === oldSocketId);
+    
+    // If not found, try by username
+    if (!player) {
+      player = this.players.find(p => p.name === username);
+    }
+    
+    if (!player) {
+      return { error: 'Player not found' };
+    }
+    
+    if (!player.connected) {
+      // Clear disconnection timeout
+      if (this.disconnectedPlayers.has(player.id)) {
+        clearTimeout(this.disconnectedPlayers.get(player.id));
+        this.disconnectedPlayers.delete(player.id);
+      }
+      
+      // Update socket ID
+      player.id = newSocketId;
+      player.connected = true;
+      
+      return { success: true, player };
+    }
+    
+    return { error: 'Player already connected' };
   }
 
   startNewRound() {
@@ -88,7 +187,6 @@ class Game {
     this.cardsThisRound = getCardsForRound(this.x, this.roundSequenceIndex);
     this.roundSequenceIndex++;
     
-    // Reset round state
     this.phase = 'guessing';
     this.guesses = {};
     this.trump = null;
@@ -96,7 +194,6 @@ class Game {
     this.tricksWon = {};
     this.currentTrick = [];
     
-    // Deal cards
     const hands = deal(this.players.length, this.cardsThisRound);
     this.players.forEach((player, i) => {
       player.hand = hands[i];
@@ -104,11 +201,9 @@ class Game {
       player.tricks = 0;
     });
     
-    // Set starting player for guessing
     if (this.roundNumber === 1) {
       this.startPlayerIndex = Math.floor(Math.random() * this.players.length);
     } else {
-      // Player to the left of the previous round's first guesser
       this.startPlayerIndex = (this.startPlayerIndex + 1) % this.players.length;
     }
     
@@ -122,17 +217,12 @@ class Game {
     if (playerIndex !== this.guessingCursor) return { error: 'Not your turn' };
     if (guess < 0 || guess > this.cardsThisRound) return { error: 'Invalid guess' };
     
-    // Store in guesses object
     this.guesses[playerId] = guess;
-    
-    // ALSO update the player's guess property
     const player = this.players[playerIndex];
     player.guess = guess;
     
-    // Move to next player
     this.guessingCursor = (this.guessingCursor + 1) % this.players.length;
     
-    // Check if all players have guessed
     const allGuessed = this.players.every(p => p.guess !== null);
     
     if (allGuessed) {
@@ -145,7 +235,6 @@ class Game {
   startTrumpSelection() {
     this.phase = 'trump_select';
     
-    // Find highest guesser (earliest clockwise from start player breaks ties)
     let highestGuess = -1;
     let selectorIndex = -1;
     
@@ -168,6 +257,9 @@ class Game {
     if (this.phase !== 'trump_select') return { error: 'Not in trump selection phase' };
     if (playerId !== this.trumpSelectPlayerId) return { error: 'Not your turn to select trump' };
     
+    const validSuits = ['clubs', 'hearts', 'spades', 'diamonds'];
+    if (!validSuits.includes(trump)) return { error: 'Invalid trump suit' };
+    
     this.trump = trump;
     this.startPlayingPhase();
     return { success: true };
@@ -189,40 +281,33 @@ class Game {
     
     const player = this.players[playerIndex];
     
-    // Find the card in player's hand
     const cardIndex = player.hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
     if (cardIndex === -1) return { error: 'Card not in hand' };
     
-    // Check if legal
     const ledSuit = this.currentTrick.length > 0 ? this.currentTrick[0].card.suit : null;
     const legalCards = getLegalCards(player.hand, ledSuit);
     const isLegal = legalCards.some(c => c.rank === card.rank && c.suit === card.suit);
     
     if (!isLegal) return { error: 'Must follow suit if possible' };
     
-    // Play the card
     player.hand.splice(cardIndex, 1);
     this.currentTrick.push({ playerId, card });
     
-    // Check if trick is complete
     if (this.currentTrick.length === this.players.length) {
-      // Store completed trick before resolving
       this.completedTrick = [...this.currentTrick];
       const trickToResolve = [...this.currentTrick];
-      this.currentTrick = []; // Clear immediately
+      this.currentTrick = [];
       
-      // Use setTimeout to allow UI to show the completed trick
       setTimeout(() => {
         this.resolveTrick(trickToResolve);
         this.completedTrick = null;
-      }, 1500); // 1.5 second delay
+      }, 1500);
     }
     
     return { success: true };
   }
 
   resolveTrick(trick) {
-    // Determine winner from the passed trick
     const ledSuit = trick[0].card.suit;
     let winningPlay = trick[0];
     
@@ -233,26 +318,21 @@ class Game {
       }
     }
     
-    // Award trick
     const winnerId = winningPlay.playerId;
     this.tricksWon[winnerId] = (this.tricksWon[winnerId] || 0) + 1;
     
-    // Update the player's tricks count
     const winnerPlayer = this.players.find(p => p.id === winnerId);
     if (winnerPlayer) {
       winnerPlayer.tricks = this.tricksWon[winnerId];
     }
     
-    // Store last trick winner for UI
     this.lastTrickWinner = {
       playerId: winnerId,
       playerName: winnerPlayer.name
     };
     
-    // Set next leader
     this.trickLeaderIndex = this.players.findIndex(p => p.id === winnerId);
     
-    // Check if round is over
     const allCardsPlayed = this.players.every(p => p.hand.length === 0);
     
     if (allCardsPlayed) {
@@ -261,12 +341,12 @@ class Game {
   }
 
   endRound() {
+    if (this.phase !== 'playing') return;
+    
     this.phase = 'vote';
     
-    // Calculate scores
     const roundScores = scoreRound(this.players, this.guesses, this.tricksWon);
     
-    // Update player totals
     this.players.forEach(player => {
       const scoreObj = roundScores.find(s => s.playerId === player.id);
       const score = scoreObj ? scoreObj.score : 0;
@@ -279,6 +359,10 @@ class Game {
 
   castContinueVote(playerId, wantsContinue) {
     if (this.phase !== 'vote') return { error: 'Not in vote phase' };
+    
+    if (this.continueVotes[playerId] !== undefined) {
+      return { error: 'Already voted' };
+    }
     
     const player = this.players.find(p => p.id === playerId);
     if (!player) return { error: 'Player not found' };
@@ -325,23 +409,16 @@ class Game {
   }
 
   getState(playerId = null) {
-    // If playerId is provided, return their actual hand
-    // Otherwise return masked hands for other players
-    
     return {
       roomCode: this.roomCode,
       host: this.host,
       players: this.players.map(p => {
-        // Determine what cards to show this player
         let handToShow;
         if (!playerId) {
-          // No specific player - mask all hands
           handToShow = p.hand.map(() => ({ rank: '?', suit: '?' }));
         } else if (p.id === playerId) {
-          // This is the requesting player - show real hand
           handToShow = p.hand;
         } else {
-          // Other player - show masked hand
           handToShow = p.hand.map(() => ({ rank: '?', suit: '?' }));
         }
         
@@ -365,8 +442,8 @@ class Game {
       guessingCursor: this.guessingCursor,
       currentTrick: this.currentTrick,
       trickLeaderIndex: this.trickLeaderIndex,
-      lastTrickWinner: this.lastTrickWinner, // Add this line
-      completedTrick: this.completedTrick, // Add this line
+      lastTrickWinner: this.lastTrickWinner,
+      completedTrick: this.completedTrick,
       continueVotes: this.continueVotes,
       viewingScoreboard: Array.from(this.viewingScoreboard),
       roundScores: this.players.map(p => ({
@@ -396,14 +473,20 @@ class Game {
     this.lastTrickWinner = null;
     this.completedTrick = null;
     
-    // Reset player stats
     this.players.forEach(player => {
       player.hand = [];
       player.guess = null;
       player.tricks = 0;
       player.roundScores = [];
       player.total = 0;
+      player.connected = true;
     });
+    
+    // Clear all disconnection timeouts
+    this.disconnectedPlayers.forEach((timeout) => {
+      clearTimeout(timeout);
+    });
+    this.disconnectedPlayers.clear();
     
     this.recalculateX();
   }

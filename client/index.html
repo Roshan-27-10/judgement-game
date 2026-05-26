@@ -34,7 +34,7 @@
         <div class="create-section">
           <label for="max-cards-input">Max Cards per Round:</label>
           <div class="create-row">
-            <input type="number" id="max-cards-input" min="1" max="26" placeholder="(optional)">
+            <input type="number" id="max-cards-input" min="1" max="13" placeholder="(optional)">
             <button id="create-room-btn">Create New Room</button>
           </div>
         </div>
@@ -78,7 +78,9 @@
         <div class="round-info">
           <h3>Round <span id="round-number"></span></h3>
           <p>Cards this round: <span id="cards-this-round"></span></p>
-          <p>Trump: <span id="trump-display"></span></p>
+          <div class="trump-info">
+            <p>Trump: <span id="trump-display"></span></p>
+          </div>
         </div>
 
         <div id="turn-indicator" class="turn-indicator"></div>
@@ -134,6 +136,9 @@
       </div>
 
       <div id="error-message" class="error"></div>
+      <div id="reconnecting-indicator" style="display: none; position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: #FFA500; color: #1a1a2e; padding: 10px 20px; border-radius: 5px; z-index: 1000; font-weight: bold;">
+        🔄 Connection lost - Reconnecting...
+      </div>
     </div>
   </div>
 

@@ -2,7 +2,6 @@ function registerHandlers(io, socket, gameManager) {
   
   socket.on('create_room', (data, callback) => {
     try {
-      // First, remove player from any existing room
       const existingRoom = gameManager.getRoomForPlayer(socket.id);
       if (existingRoom) {
         const oldGame = gameManager.getGame(existingRoom);
@@ -19,7 +18,6 @@ function registerHandlers(io, socket, gameManager) {
         gameManager.playerToRoom.delete(socket.id);
       }
       
-      // Create new room with custom X if provided
       const customX = data.customX || null;
       const game = gameManager.createGame(customX);
       const roomCode = game.roomCode;
@@ -53,7 +51,6 @@ function registerHandlers(io, socket, gameManager) {
 
   socket.on('join_room', (data, callback) => {
     try {
-      // First, remove player from any existing room
       const existingRoom = gameManager.getRoomForPlayer(socket.id);
       if (existingRoom) {
         const oldGame = gameManager.getGame(existingRoom);
@@ -61,18 +58,15 @@ function registerHandlers(io, socket, gameManager) {
           oldGame.removePlayer(socket.id);
           socket.leave(existingRoom);
           
-          // Clean up empty games
           if (oldGame.players.length === 0) {
             gameManager.games.delete(existingRoom);
           } else {
-            // Notify remaining players
             broadcastGameState(io, existingRoom, oldGame);
           }
         }
         gameManager.playerToRoom.delete(socket.id);
       }
       
-      // Now join new room
       const game = gameManager.getGame(data.roomCode);
       
       if (!game) {
@@ -115,6 +109,39 @@ function registerHandlers(io, socket, gameManager) {
     }
   });
 
+  // New reconnection handler
+  socket.on('reconnect_game', (data, callback) => {
+    const { roomCode, username } = data;
+    
+    if (!roomCode || !username) {
+      if (callback) callback({ error: 'Missing room code or username' });
+      return;
+    }
+    
+    const game = gameManager.getGame(roomCode);
+    if (!game) {
+      if (callback) callback({ error: 'Game not found' });
+      return;
+    }
+    
+    const result = game.reconnectPlayer(null, socket.id, username);
+    
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+    
+    gameManager.addPlayerToRoom(socket.id, roomCode);
+    socket.join(roomCode);
+    
+    if (callback) callback({ 
+      success: true, 
+      gameState: game.getState(socket.id) 
+    });
+    
+    broadcastGameState(io, roomCode, game);
+  });
+
   socket.on('start_game', (callback) => {
     const roomCode = gameManager.getRoomForPlayer(socket.id);
     if (!roomCode) {
@@ -140,7 +167,6 @@ function registerHandlers(io, socket, gameManager) {
       return;
     }
 
-    // Start first round
     game.startNewRound();
     
     if (callback && typeof callback === 'function') {
@@ -205,10 +231,8 @@ function registerHandlers(io, socket, gameManager) {
     
     if (callback) callback({ success: true });
     
-    // Broadcast immediately to show the played card
     broadcastGameState(io, roomCode, game);
     
-    // If trick is complete, broadcast again after delay to show resolution
     if (game.completedTrick) {
       setTimeout(() => {
         broadcastGameState(io, roomCode, game);
@@ -263,13 +287,11 @@ function registerHandlers(io, socket, gameManager) {
 
     const game = gameManager.getGame(roomCode);
     
-    // Only host can start new game
     if (game.host !== socket.id) {
       if (callback) callback({ error: 'Only host can start a new game' });
       return;
     }
     
-    // Update customX if provided
     if (data && data.customX) {
       game.customX = data.customX;
     }
@@ -280,9 +302,13 @@ function registerHandlers(io, socket, gameManager) {
     broadcastGameState(io, roomCode, game);
   });
 
+  // Track heartbeat
+  socket.on('ping', () => {
+    socket.emit('pong');
+  });
+
 }
 
-// Helper function to broadcast state to each player with their own perspective
 function broadcastGameState(io, roomCode, game) {
   const sockets = io.sockets.adapter.rooms.get(roomCode);
   if (sockets) {
