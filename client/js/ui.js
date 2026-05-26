@@ -169,7 +169,8 @@ function updateGamePlayUI(state) {
   // Update hand
   if (currentPlayer) {
     handCards.innerHTML = '';
-    currentPlayer.hand.forEach(card => {
+    const sortedHand = sortCards(currentPlayer.hand);
+    sortedHand.forEach(card => {
       const cardDiv = document.createElement('div');
       cardDiv.className = `card ${card.suit}`;
       cardDiv.textContent = `${card.rank} ${getSuitSymbol(card.suit)}`;
@@ -475,6 +476,24 @@ function getSuitSymbol(suit) {
     'spades': '♠'
   };
   return symbols[suit] || suit;
+}
+
+// Add after the getSuitSymbol function (around line 324)
+function sortCards(cards) {
+  const suitOrder = { 'clubs': 0, 'hearts': 1, 'spades': 2, 'diamonds': 3 };
+  const rankOrder = {
+    '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8,
+    '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14
+  };
+
+  return [...cards].sort((a, b) => {
+    // First sort by suit
+    if (suitOrder[a.suit] !== suitOrder[b.suit]) {
+      return suitOrder[a.suit] - suitOrder[b.suit];
+    }
+    // Then sort by rank within the same suit
+    return rankOrder[a.rank] - rankOrder[b.rank];
+  });
 }
 
 // Add element reference
