@@ -19,12 +19,44 @@ const readyStatus = document.getElementById('ready-status');
 const scoreboardContainer = document.getElementById('scoreboard-container');
 const guessesDisplay = document.getElementById('guesses-display');
 const guessesList = document.getElementById('guesses-list');
+const waitingNextRound = document.getElementById('waiting-next-round');
+const restartRoundControls = document.getElementById('restart-round-controls');
+const restartVoteStatus = document.getElementById('restart-vote-status');
+const restartVoteYes = document.getElementById('restart-vote-yes');
+const restartVoteNo = document.getElementById('restart-vote-no');
+const restartRoundBtn = document.getElementById('restart-round-btn');
+const endGameBtn = document.getElementById('end-game-btn');
+const leaveRoomBtn = document.getElementById('leave-room-btn');
+const leaveRoomConfirm = document.getElementById('leave-room-confirm');
+const confirmLeaveRoomBtn = document.getElementById('confirm-leave-room-btn');
+const backToGameBtn = document.getElementById('back-to-game-btn');
+let leaveConfirmVisible = false;
+const endGameVoteControls = document.getElementById('end-game-vote-controls');
+const endGameVoteStatus = document.getElementById('end-game-vote-status');
+const endGameVoteYes = document.getElementById('end-game-vote-yes');
+const endGameVoteNo = document.getElementById('end-game-vote-no');
+const kickPlayerControls = document.getElementById('kick-player-controls');
+const kickStartRow = document.getElementById('kick-start-row');
+const kickPlayerSelect = document.getElementById('kick-player-select');
+const startKickVoteBtn = document.getElementById('start-kick-vote-btn');
+const kickVotePanel = document.getElementById('kick-vote-panel');
+const kickVoteStatus = document.getElementById('kick-vote-status');
+const kickVoteYes = document.getElementById('kick-vote-yes');
+const kickVoteNo = document.getElementById('kick-vote-no');
+const cancelKickVoteBtn = document.getElementById('cancel-kick-vote-btn');
+const kickPlayerBtn = document.getElementById('kick-player-btn');
+const gameActionsToggle = document.getElementById('game-actions-toggle');
+const gameActionsSidebar = document.getElementById('game-actions-sidebar');
+const gameActionsClose = document.getElementById('game-actions-close');
+const gameActionsOverlay = document.getElementById('game-actions-overlay');
 
 // Game play elements
 const roundNumber = document.getElementById('round-number');
 const cardsThisRound = document.getElementById('cards-this-round');
 const trumpDisplay = document.getElementById('trump-display');
 const handCards = document.getElementById('hand-cards');
+const handOrganizer = document.getElementById('hand-organizer');
+const currentSuitOrder = document.getElementById('current-suit-order');
 const currentTrick = document.getElementById('current-trick');
 const guessControls = document.getElementById('guess-controls');
 const guessButtons = document.getElementById('guess-buttons');
@@ -39,6 +71,178 @@ const endedContainer = document.getElementById('ended-container');
 const winnerDisplay = document.getElementById('winner-display');
 const finalScoreboard = document.getElementById('final-scoreboard');
 const newGameBtn = document.getElementById('new-game-btn');
+
+const DEFAULT_SUIT_ORDER = ['spades', 'diamonds', 'clubs', 'hearts'];
+const RANK_ORDER = {
+  '2': 2,
+  '3': 3,
+  '4': 4,
+  '5': 5,
+  '6': 6,
+  '7': 7,
+  '8': 8,
+  '9': 9,
+  '10': 10,
+  'J': 11,
+  'Q': 12,
+  'K': 13,
+  'A': 14
+};
+
+// The visible hand is always shown in the original clean suit-row layout.
+let handSortMode = 'suit';
+let suitOrder = [...DEFAULT_SUIT_ORDER];
+
+function loadSuitOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('judgementSuitOrder') || 'null');
+    if (Array.isArray(saved) && saved.length === DEFAULT_SUIT_ORDER.length && DEFAULT_SUIT_ORDER.every(suit => saved.includes(suit))) {
+      return saved;
+    }
+  } catch (error) {
+    // Ignore corrupt local storage and use the default order.
+  }
+  return [...DEFAULT_SUIT_ORDER];
+}
+
+function saveHandOrganizerPrefs() {
+  localStorage.setItem('judgementHandSortMode', handSortMode);
+  localStorage.setItem('judgementSuitOrder', JSON.stringify(suitOrder));
+}
+
+function setGameActionsSidebarOpen(open) {
+  if (!gameActionsSidebar || !gameActionsOverlay) return;
+  gameActionsSidebar.classList.toggle('open', open);
+  gameActionsOverlay.classList.toggle('open', open);
+  gameActionsSidebar.setAttribute('aria-hidden', open ? 'false' : 'true');
+  document.body.classList.toggle('game-actions-open', open);
+}
+
+function updateGameActionsToggle(state, currentPlayer) {
+  if (!gameActionsToggle) return;
+  const canOpenActions = !!currentPlayer && currentPlayer.connected && state.phase !== 'lobby' && state.phase !== 'ended';
+  gameActionsToggle.style.display = canOpenActions ? 'inline-block' : 'none';
+  if (!canOpenActions) {
+    setGameActionsSidebarOpen(false);
+  }
+}
+
+function getCardRankValue(card) {
+  return RANK_ORDER[String(card.rank)] || 0;
+}
+
+function getSuitOrderValue(suit, trump = null) {
+  if (trump && suit === trump) return -1;
+  const index = suitOrder.indexOf(suit);
+  return index === -1 ? 99 : index;
+}
+
+function compareCardsByRankThenSuit(a, b, trump = null) {
+  const rankDiff = getCardRankValue(b) - getCardRankValue(a);
+  if (rankDiff !== 0) return rankDiff;
+  return getSuitOrderValue(a.suit, trump) - getSuitOrderValue(b.suit, trump);
+}
+
+function compareCardsBySuitThenRank(a, b, trump = null) {
+  const suitDiff = getSuitOrderValue(a.suit, trump) - getSuitOrderValue(b.suit, trump);
+  if (suitDiff !== 0) return suitDiff;
+  return getCardRankValue(b) - getCardRankValue(a);
+}
+
+function getDisplaySuitOrder(trump = null) {
+  return [...suitOrder];
+}
+
+function getOrganizedHand(hand, trump = null) {
+  const cards = [...(hand || [])];
+
+  if (handSortMode === 'rank') {
+    cards.sort((a, b) => compareCardsByRankThenSuit(a, b, null));
+  } else if (handSortMode === 'suit') {
+    cards.sort((a, b) => compareCardsBySuitThenRank(a, b, null));
+  } else if (handSortMode === 'trump') {
+    cards.sort((a, b) => compareCardsBySuitThenRank(a, b, trump));
+  }
+
+  return cards;
+}
+
+function getSuitName(suit) {
+  const names = {
+    clubs: 'Clubs',
+    hearts: 'Hearts',
+    spades: 'Spades',
+    diamonds: 'Diamonds'
+  };
+  return names[suit] || suit;
+}
+
+function createPlayableCard(card) {
+  const cardDiv = document.createElement('div');
+  cardDiv.className = `card ${card.suit}`;
+  cardDiv.textContent = `${card.rank} ${getSuitSymbol(card.suit)}`;
+  cardDiv.addEventListener('click', () => playCard(card));
+  return cardDiv;
+}
+
+function updateHandOrganizerUI() {
+  document.querySelectorAll('.hand-sort-btn[data-sort]').forEach(button => {
+    button.classList.toggle('active', button.dataset.sort === handSortMode);
+  });
+
+  document.querySelectorAll('.suit-order-btn').forEach(button => {
+    const index = suitOrder.indexOf(button.dataset.suit);
+    button.textContent = `${index + 1}. ${getSuitSymbol(button.dataset.suit)}`;
+    button.title = 'Click to move this suit earlier in the order';
+  });
+
+  if (currentSuitOrder) {
+    currentSuitOrder.textContent = `Current suit order: ${suitOrder.map(getSuitSymbol).join('  ')}`;
+  }
+}
+
+function renderHand(currentPlayer, state) {
+  if (!handCards) return;
+
+  handCards.innerHTML = '';
+
+  const hand = currentPlayer ? [...(currentPlayer.hand || [])] : [];
+
+  // Original clean hand layout: one row per suit, cards sorted high-to-low inside each suit.
+  handCards.classList.add('suit-grouped-hand');
+  const orderedSuits = getDisplaySuitOrder();
+
+  orderedSuits.forEach(suit => {
+    const suitCards = hand
+      .filter(card => card.suit === suit)
+      .sort((a, b) => getCardRankValue(b) - getCardRankValue(a));
+
+    const row = document.createElement('div');
+    row.className = `suit-hand-row ${suit}`;
+
+    const label = document.createElement('div');
+    label.className = `suit-hand-label ${suit}`;
+    label.textContent = `${getSuitSymbol(suit)} ${getSuitName(suit)}`;
+
+    const cards = document.createElement('div');
+    cards.className = 'suit-hand-cards';
+    suitCards.forEach(card => cards.appendChild(createPlayableCard(card)));
+
+    row.appendChild(label);
+    row.appendChild(cards);
+    handCards.appendChild(row);
+  });
+}
+
+function rerenderHandIfPossible() {
+  updateHandOrganizerUI();
+
+  if (!gameState) return;
+  const currentPlayer = gameState.players.find(p => p.id === currentPlayerId);
+  if (currentPlayer) {
+    renderHand(currentPlayer, gameState);
+  }
+}
 
 async function createRoom(username, customX = null) {
   try {
@@ -125,25 +329,286 @@ trumpControls.addEventListener('click', (e) => {
 
 // Vote controls
 document.getElementById('vote-continue').addEventListener('click', () => {
-  socket.emit('continue_vote', { continue: true });
-  // Disable buttons to prevent double-voting
-  document.getElementById('vote-continue').disabled = true;
-  document.getElementById('vote-stop').disabled = true;
+  const continueBtn = document.getElementById('vote-continue');
+  const stopBtn = document.getElementById('vote-stop');
+  continueBtn.disabled = true;
+  stopBtn.disabled = true;
+
+  socket.emit('continue_vote', { continue: true }, (response) => {
+    if (response && response.error) {
+      showError(response.error);
+      continueBtn.disabled = false;
+      stopBtn.disabled = false;
+    }
+  });
 });
 
 document.getElementById('vote-stop').addEventListener('click', () => {
-  socket.emit('continue_vote', { continue: false });
-  // Disable buttons to prevent double-voting
-  document.getElementById('vote-continue').disabled = true;
-  document.getElementById('vote-stop').disabled = true;
+  const continueBtn = document.getElementById('vote-continue');
+  const stopBtn = document.getElementById('vote-stop');
+  continueBtn.disabled = true;
+  stopBtn.disabled = true;
+
+  socket.emit('continue_vote', { continue: false }, (response) => {
+    if (response && response.error) {
+      showError(response.error);
+      continueBtn.disabled = false;
+      stopBtn.disabled = false;
+    }
+  });
 });
 
 document.getElementById('ready-next-round').addEventListener('click', () => {
   const btn = document.getElementById('ready-next-round');
   btn.disabled = true;
   btn.textContent = 'Waiting for others...';
-  socket.emit('ready_next_round');
+  socket.emit('ready_next_round', (response) => {
+    if (response && response.error) {
+      showError(response.error);
+      btn.disabled = false;
+      btn.textContent = 'Ready for Next Round';
+    }
+  });
 });
+
+
+document.querySelectorAll('.hand-sort-btn[data-sort]').forEach(button => {
+  button.addEventListener('click', () => {
+    handSortMode = button.dataset.sort;
+    saveHandOrganizerPrefs();
+    rerenderHandIfPossible();
+  });
+});
+
+document.querySelectorAll('.suit-order-btn').forEach(button => {
+  button.addEventListener('click', () => {
+    const suit = button.dataset.suit;
+    const currentIndex = suitOrder.indexOf(suit);
+    if (currentIndex > 0) {
+      suitOrder.splice(currentIndex, 1);
+      suitOrder.unshift(suit);
+    } else if (currentIndex === 0) {
+      suitOrder.push(suitOrder.shift());
+    }
+    saveHandOrganizerPrefs();
+    rerenderHandIfPossible();
+  });
+});
+
+const resetSuitOrderBtn = document.getElementById('reset-suit-order-btn');
+if (resetSuitOrderBtn) {
+  resetSuitOrderBtn.addEventListener('click', () => {
+    suitOrder = [...DEFAULT_SUIT_ORDER];
+    saveHandOrganizerPrefs();
+    rerenderHandIfPossible();
+  });
+}
+
+if (gameActionsToggle) {
+  gameActionsToggle.addEventListener('click', () => {
+    const isOpen = gameActionsSidebar && gameActionsSidebar.classList.contains('open');
+    setGameActionsSidebarOpen(!isOpen);
+  });
+}
+
+if (gameActionsClose) {
+  gameActionsClose.addEventListener('click', () => setGameActionsSidebarOpen(false));
+}
+
+if (gameActionsOverlay) {
+  gameActionsOverlay.addEventListener('click', () => setGameActionsSidebarOpen(false));
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    setGameActionsSidebarOpen(false);
+  }
+});
+
+restartVoteYes.addEventListener('click', () => {
+  socket.emit('restart_round_vote', { restart: true }, (response) => {
+    if (response && response.error) {
+      showError(response.error);
+    }
+  });
+});
+
+restartVoteNo.addEventListener('click', () => {
+  socket.emit('restart_round_vote', { restart: false }, (response) => {
+    if (response && response.error) {
+      showError(response.error);
+    }
+  });
+});
+
+restartRoundBtn.addEventListener('click', () => {
+  const ok = window.confirm('Restart this round? Current cards, guesses, trump, and tricks for this round will be discarded and cards will be redistributed.');
+  if (!ok) return;
+
+  restartRoundBtn.disabled = true;
+  socket.emit('restart_round', (response) => {
+    if (response && response.error) {
+      showError(response.error);
+      restartRoundBtn.disabled = false;
+    }
+  });
+});
+
+if (endGameVoteYes) {
+  endGameVoteYes.addEventListener('click', () => {
+    socket.emit('end_game_vote', { endGame: true }, (response) => {
+      if (response && response.error) {
+        showError(response.error);
+      }
+    });
+  });
+}
+
+if (endGameVoteNo) {
+  endGameVoteNo.addEventListener('click', () => {
+    socket.emit('end_game_vote', { endGame: false }, (response) => {
+      if (response && response.error) {
+        showError(response.error);
+      }
+    });
+  });
+}
+
+if (endGameBtn) {
+  endGameBtn.addEventListener('click', () => {
+    const ok = window.confirm('End the game now? This is allowed only after majority yes votes. The current unfinished round will not be scored.');
+    if (!ok) return;
+
+    endGameBtn.disabled = true;
+    socket.emit('end_game', (response) => {
+      endGameBtn.disabled = false;
+      if (response && response.error) {
+        showError(response.error);
+      }
+    });
+  });
+}
+
+function setLeaveConfirmVisible(visible) {
+  leaveConfirmVisible = !!visible;
+
+  if (leaveRoomConfirm) {
+    leaveRoomConfirm.style.display = leaveConfirmVisible ? 'block' : 'none';
+  }
+
+  if (leaveRoomBtn && gameState) {
+    const currentPlayer = gameState.players.find(p => p.id === currentPlayerId);
+    const canLeave = !!currentPlayer && gameState.phase !== 'ended';
+    leaveRoomBtn.style.display = canLeave && !leaveConfirmVisible ? 'inline-block' : 'none';
+    leaveRoomBtn.disabled = false;
+  }
+}
+
+function completeLeaveRoom() {
+  if (confirmLeaveRoomBtn) confirmLeaveRoomBtn.disabled = true;
+  if (backToGameBtn) backToGameBtn.disabled = true;
+
+  socket.emit('leave_room', (response) => {
+    if (confirmLeaveRoomBtn) confirmLeaveRoomBtn.disabled = false;
+    if (backToGameBtn) backToGameBtn.disabled = false;
+
+    if (response && response.error) {
+      showError(response.error);
+      return;
+    }
+
+    if (typeof clearSavedSession === 'function') {
+      clearSavedSession();
+    }
+    currentRoom = null;
+    currentPlayerId = socket.id;
+    gameState = null;
+    setLeaveConfirmVisible(false);
+    showLobbyScreen();
+    showError('You left the room.');
+  });
+}
+
+if (leaveRoomBtn) {
+  leaveRoomBtn.addEventListener('click', () => {
+    setLeaveConfirmVisible(true);
+  });
+}
+
+if (backToGameBtn) {
+  backToGameBtn.addEventListener('click', () => {
+    setLeaveConfirmVisible(false);
+    setGameActionsSidebarOpen(false);
+  });
+}
+
+if (confirmLeaveRoomBtn) {
+  confirmLeaveRoomBtn.addEventListener('click', () => {
+    completeLeaveRoom();
+  });
+}
+
+if (startKickVoteBtn) {
+  startKickVoteBtn.addEventListener('click', () => {
+    const targetPlayerId = kickPlayerSelect ? kickPlayerSelect.value : null;
+    if (!targetPlayerId) {
+      showError('Choose a player to kick');
+      return;
+    }
+
+    socket.emit('start_kick_vote', { targetPlayerId }, (response) => {
+      if (response && response.error) {
+        showError(response.error);
+      }
+    });
+  });
+}
+
+if (kickVoteYes) {
+  kickVoteYes.addEventListener('click', () => {
+    socket.emit('kick_vote', { kick: true }, (response) => {
+      if (response && response.error) {
+        showError(response.error);
+      }
+    });
+  });
+}
+
+if (kickVoteNo) {
+  kickVoteNo.addEventListener('click', () => {
+    socket.emit('kick_vote', { kick: false }, (response) => {
+      if (response && response.error) {
+        showError(response.error);
+      }
+    });
+  });
+}
+
+if (cancelKickVoteBtn) {
+  cancelKickVoteBtn.addEventListener('click', () => {
+    socket.emit('cancel_kick_vote', (response) => {
+      if (response && response.error) {
+        showError(response.error);
+      }
+    });
+  });
+}
+
+if (kickPlayerBtn) {
+  kickPlayerBtn.addEventListener('click', () => {
+    const targetName = gameState?.kickVoteStatus?.targetPlayerName || 'this player';
+    const ok = window.confirm(`Kick ${targetName}? If they are active in the current round, the round will restart and cards will be redistributed.`);
+    if (!ok) return;
+
+    kickPlayerBtn.disabled = true;
+    socket.emit('kick_player', (response) => {
+      kickPlayerBtn.disabled = false;
+      if (response && response.error) {
+        showError(response.error);
+      }
+    });
+  });
+}
 
 function showGameScreen() {
   lobbyScreen.classList.remove('active');
@@ -151,37 +616,60 @@ function showGameScreen() {
   document.getElementById('scoreboard-container').style.display = 'block';
 }
 
+function showLobbyScreen() {
+  gameScreen.classList.remove('active');
+  lobbyScreen.classList.add('active');
+  if (scoreboardContainer) scoreboardContainer.style.display = 'none';
+  if (gamePlayArea) gamePlayArea.style.display = 'none';
+  if (gameActionsToggle) gameActionsToggle.style.display = 'none';
+  setGameActionsSidebarOpen(false);
+  setLeaveConfirmVisible(false);
+}
+
 function showError(message) {
-  errorMessage.textContent = message;
+  const lobbyErrorMessage = document.getElementById('lobby-error-message');
+  const targetError = gameScreen && gameScreen.classList.contains('active')
+    ? errorMessage
+    : (lobbyErrorMessage || errorMessage);
+
+  if (!targetError) return;
+
+  targetError.textContent = message;
   setTimeout(() => {
-    errorMessage.textContent = '';
+    targetError.textContent = '';
   }, 3000);
 }
 
 function updateGamePlayUI(state) {
   roundNumber.textContent = state.roundNumber;
   cardsThisRound.textContent = state.cardsThisRound;
-  
-  // Update trump display with selector info
-  updateTrumpDisplay(state);
+  trumpDisplay.textContent = state.trump || 'Not selected';
   
   // Find current player
   const currentPlayer = state.players.find(p => p.id === currentPlayerId);
+  updateGameActionsToggle(state, currentPlayer);
+  const isWaitingForNextRound = currentPlayer && currentPlayer.pendingJoin && !currentPlayer.activeInRound && state.phase !== 'ended';
+
+  if (waitingNextRound) {
+    if (isWaitingForNextRound) {
+      waitingNextRound.textContent = `You joined while Round ${state.roundNumber} is in progress. You will start playing from Round ${currentPlayer.joinedRoundNumber}. If the host restarts this round after majority approval, you will be included immediately.`;
+      waitingNextRound.style.display = 'block';
+    } else {
+      waitingNextRound.style.display = 'none';
+    }
+  }
+
+  updateRestartRoundControls(state, currentPlayer);
+  updateEndGameVoteControls(state, currentPlayer);
+  updateKickPlayerControls(state, currentPlayer);
+  updateHostGameControls(state, currentPlayer);
   
-  // Update hand
+  // Update hand in the clean original suit-row layout.
   if (currentPlayer) {
-    handCards.innerHTML = '';
-    const sortedHand = sortCards(currentPlayer.hand);
-    sortedHand.forEach(card => {
-      const cardDiv = document.createElement('div');
-      cardDiv.className = `card ${card.suit}`;
-      cardDiv.textContent = `${card.rank} ${getSuitSymbol(card.suit)}`;
-      cardDiv.addEventListener('click', () => playCard(card));
-      handCards.appendChild(cardDiv);
-    });
+    renderHand(currentPlayer, state);
   }
   
-  // Update current trick
+  // Update current trick - show either current or completed trick
   currentTrick.innerHTML = '';
   const trickToShow = state.completedTrick && state.completedTrick.length > 0 
     ? state.completedTrick 
@@ -192,7 +680,7 @@ function updateGamePlayUI(state) {
       const player = state.players.find(p => p.id === play.playerId);
       const cardDiv = document.createElement('div');
       cardDiv.className = `card ${play.card.suit}`;
-      cardDiv.textContent = `${player ? player.name : 'Unknown'}: ${play.card.rank} ${getSuitSymbol(play.card.suit)}`;
+      cardDiv.textContent = `${player ? player.name : 'Player'}: ${play.card.rank} ${getSuitSymbol(play.card.suit)}`;
       currentTrick.appendChild(cardDiv);
     });
   }
@@ -202,44 +690,42 @@ function updateGamePlayUI(state) {
   }
 
   // Show/hide containers based on phase
-  guessControls.style.display = state.phase === 'guessing' ? 'block' : 'none';
-  trumpControls.style.display = state.phase === 'trump_select' && state.trumpSelectPlayerId === currentPlayerId ? 'block' : 'none';
+  guessControls.style.display = state.phase === 'guessing' && !isWaitingForNextRound ? 'block' : 'none';
+  trumpControls.style.display = state.phase === 'trump_select' && state.trumpSelectPlayerId === currentPlayerId && !isWaitingForNextRound ? 'block' : 'none';
   
   // Handle vote controls
-  if (state.phase === 'vote') {
+  if (state.phase === 'vote' && currentPlayer && currentPlayer.activeInRound) {
     voteControls.style.display = 'block';
+    // Reset button states when entering vote phase
     document.getElementById('vote-continue').disabled = false;
     document.getElementById('vote-stop').disabled = false;
     
+    // Hide if already voted
     if (state.continueVotes && state.continueVotes[currentPlayerId] !== undefined) {
       voteControls.style.display = 'none';
     }
+
   } else {
     voteControls.style.display = 'none';
   }
 
   endedContainer.style.display = state.phase === 'ended' ? 'block' : 'none';
   
-  document.getElementById('hand-container').style.display = state.phase === 'ended' ? 'none' : 'block';
+  // Hide hand and trick during ended phase
+  document.getElementById('hand-container').style.display = (state.phase === 'ended' || isWaitingForNextRound) ? 'none' : 'block';
   document.getElementById('trick-container').style.display = state.phase === 'ended' ? 'none' : 'block';
 
-  // Update turn indicator with better styling
-  updateTurnIndicator(state);
+  // Always show whose chance/turn it is during the game
+  updateChanceIndicator(state);
   
   // Update guess buttons
   if (state.phase === 'guessing') {
     updateGuessButtons(state);
   }
 
-  if (state.phase === 'guessing' || state.phase === 'trump_select' || state.phase === 'playing') {
-    if (guessesDisplay) {
-      guessesDisplay.style.display = 'block';
-      updateGuessesList(state);
-    }
-  } else {
-    if (guessesDisplay) {
-      guessesDisplay.style.display = 'none';
-    }
+  // Round guesses are now shown compactly beside each player's name as a 🎯 needed count.
+  if (guessesDisplay) {
+    guessesDisplay.style.display = 'none';
   }
 
   // Handle ready controls for scoreboard phase
@@ -259,180 +745,275 @@ function updateGamePlayUI(state) {
     readyControls.style.display = 'none';
   }
   
+  // Update scoreboard
   if (state.phase === 'scoreboard' || state.phase === 'vote' || state.phase === 'ended') {
     updateScoreboard(state);
   }
 
+  // Update ended screen
   if (state.phase === 'ended') {
     updateEndedScreen(state);
   }
-  
-  // Highlight current guesser and trump selector in players list
-  updatePlayerHighlights(state);
+
 }
 
-// New function to update trump display with selector info
-function updateTrumpDisplay(state) {
-  if (!trumpDisplay) return;
-  
-  if (state.trump) {
-    const trumpSymbol = getSuitSymbol(state.trump);
-    const trumpText = `${state.trump.charAt(0).toUpperCase() + state.trump.slice(1)} ${trumpSymbol}`;
-    
-    // Find who selected trump
-    const trumpSelector = state.players.find(p => p.id === state.trumpSelectPlayerId);
-    
-    if (trumpSelector && state.phase === 'trump_select') {
-      trumpDisplay.innerHTML = `${trumpText} <span class="trump-indicator">🎯 ${trumpSelector.name} is choosing...</span>`;
-    } else if (trumpSelector && state.trump) {
-      trumpDisplay.innerHTML = `${trumpText} <span class="trump-selector-name">(selected by ${trumpSelector.name})</span>`;
-    } else {
-      trumpDisplay.textContent = trumpText;
-    }
-  } else {
-    if (state.trumpSelectPlayerId && state.phase === 'trump_select') {
-      const selector = state.players.find(p => p.id === state.trumpSelectPlayerId);
-      trumpDisplay.innerHTML = `Not selected yet <span class="trump-indicator">🎯 ${selector ? selector.name : 'Player'} choosing...</span>`;
-    } else {
-      trumpDisplay.textContent = 'Not selected';
-    }
+function updateHostGameControls(state, currentPlayer) {
+  const canLeave = !!currentPlayer && state.phase !== 'ended';
+
+  if (!canLeave) {
+    setLeaveConfirmVisible(false);
+  }
+
+  if (leaveRoomBtn) {
+    leaveRoomBtn.style.display = canLeave && !leaveConfirmVisible ? 'inline-block' : 'none';
+    leaveRoomBtn.disabled = false;
+  }
+
+  if (leaveRoomConfirm) {
+    leaveRoomConfirm.style.display = canLeave && leaveConfirmVisible ? 'block' : 'none';
   }
 }
 
-// New function to update turn indicator with better styling
-function updateTurnIndicator(state) {
-  if (state.phase !== 'playing') {
+function updateEndGameVoteControls(state, currentPlayer) {
+  if (!endGameVoteControls || !endGameVoteStatus) return;
+
+  const canShow = currentPlayer && currentPlayer.connected && state.phase !== 'lobby' && state.phase !== 'ended';
+  if (!canShow) {
+    endGameVoteControls.style.display = 'none';
+    return;
+  }
+
+  endGameVoteControls.style.display = 'block';
+
+  const voteStatus = state.endGameVoteStatus || {
+    yesCount: 0,
+    noCount: 0,
+    totalEligible: 0,
+    threshold: 0,
+    canHostEnd: false,
+    votes: {}
+  };
+
+  const votes = voteStatus.votes || {};
+  const myVote = votes[currentPlayerId];
+  const remainingYesVotes = Math.max(0, voteStatus.threshold - voteStatus.yesCount);
+  const myVoteText = myVote === true
+    ? 'Your vote: Yes'
+    : myVote === false
+      ? 'Your vote: No'
+      : 'You have not voted yet';
+
+  endGameVoteStatus.textContent = `End game yes votes: ${voteStatus.yesCount}/${voteStatus.threshold} needed. No votes: ${voteStatus.noCount}. ${myVoteText}.`;
+
+  if (endGameVoteYes) {
+    endGameVoteYes.textContent = myVote === true ? 'Voted Yes' : 'Vote Yes';
+  }
+  if (endGameVoteNo) {
+    endGameVoteNo.textContent = myVote === false ? 'Voted No' : 'Vote No';
+  }
+
+  if (endGameBtn) {
+    const isHost = state.host === currentPlayerId;
+    endGameBtn.style.display = isHost ? 'inline-block' : 'none';
+    endGameBtn.disabled = !voteStatus.canHostEnd;
+    endGameBtn.textContent = voteStatus.canHostEnd
+      ? 'End Game'
+      : `Host End Locked (${remainingYesVotes} more yes)`;
+  }
+}
+
+function updateChanceIndicator(state) {
+  if (!turnIndicator) return;
+
+  const showIndicator = state.phase !== 'lobby' && state.phase !== 'ended';
+  if (!showIndicator) {
     turnIndicator.style.display = 'none';
     return;
   }
-  
-  // Hide turn indicator if trick is complete
-  if (state.completedTrick && state.completedTrick.length > 0) {
-    turnIndicator.style.display = 'none';
-    return;
+
+  let text = 'Waiting...';
+  let color = '#eee';
+
+  if (state.phase === 'guessing') {
+    const guessPlayer = state.players.find(p => p.id === state.guessingPlayerId);
+    if (guessPlayer && guessPlayer.id === currentPlayerId) {
+      text = '🎲 YOUR CHANCE TO GUESS!';
+      color = '#4CAF50';
+    } else if (guessPlayer) {
+      text = `🎲 ${guessPlayer.name}'s chance to guess...`;
+    } else {
+      text = '🎲 Waiting for guessing turn...';
+    }
+  } else if (state.phase === 'trump_select') {
+    const trumpPlayer = state.players.find(p => p.id === state.trumpSelectPlayerId);
+    if (trumpPlayer && trumpPlayer.id === currentPlayerId) {
+      text = '🃏 YOUR CHANCE TO SELECT TRUMP!';
+      color = '#4CAF50';
+    } else if (trumpPlayer) {
+      text = `🃏 ${trumpPlayer.name}'s chance to select trump...`;
+    } else {
+      text = '🃏 Waiting for trump selection...';
+    }
+  } else if (state.phase === 'playing') {
+    if (state.completedTrick && state.completedTrick.length > 0) {
+      text = '⏳ Trick complete — resolving winner...';
+      color = '#FFA500';
+    } else {
+      const turnPlayer = state.players.find(p => p.id === state.currentTurnPlayerId);
+      if (turnPlayer && turnPlayer.id === currentPlayerId) {
+        text = '🎮 YOUR TURN TO PLAY!';
+        color = '#4CAF50';
+      } else if (turnPlayer) {
+        text = `🎮 ${turnPlayer.name}'s chance to play...`;
+      } else {
+        text = '🎮 Waiting for turn...';
+      }
+    }
+  } else if (state.phase === 'vote') {
+    text = '🗳️ Round over — waiting for continue votes...';
+    color = '#FFA500';
+  } else if (state.phase === 'scoreboard') {
+    text = '✅ Waiting for everyone to be ready for the next round...';
+    color = '#FFA500';
   }
-  
-  // Calculate whose turn it is
-  const currentPlayerIndex = (state.trickLeaderIndex + state.currentTrick.length) % state.players.length;
-  const turnPlayer = state.players[currentPlayerIndex];
-  
-  if (turnPlayer && turnPlayer.id === currentPlayerId) {
-    turnIndicator.textContent = "🎮 YOUR TURN!";
-    turnIndicator.className = "turn-indicator your-turn";
-  } else if (turnPlayer) {
-    turnIndicator.textContent = `🎮 ${turnPlayer.name}'s turn...`;
-    turnIndicator.className = "turn-indicator waiting";
-  }
+
+  turnIndicator.textContent = text;
+  turnIndicator.style.color = color;
   turnIndicator.style.display = 'block';
 }
 
-// New function to highlight current guesser and trump selector
-function updatePlayerHighlights(state) {
-  const playersList = document.getElementById('players-list');
-  if (!playersList) return;
-  
-  // Get all player items
-  const playerItems = playersList.children;
-  
-  // Remove all existing highlight classes
-  for (let i = 0; i < playerItems.length; i++) {
-    playerItems[i].classList.remove('current-guesser', 'trump-selector');
-  }
-  
-  // Highlight current guesser during guessing phase
-  if (state.phase === 'guessing') {
-    const currentGuesser = state.players[state.guessingCursor];
-    if (currentGuesser) {
-      for (let i = 0; i < playerItems.length; i++) {
-        if (playerItems[i].textContent.includes(currentGuesser.name)) {
-          playerItems[i].classList.add('current-guesser');
-          break;
-        }
-      }
-    }
-  }
-  
-  // Highlight trump selector during trump selection and playing phases
-  if ((state.phase === 'trump_select' || state.phase === 'playing') && state.trumpSelectPlayerId) {
-    const trumpSelector = state.players.find(p => p.id === state.trumpSelectPlayerId);
-    if (trumpSelector) {
-      for (let i = 0; i < playerItems.length; i++) {
-        if (playerItems[i].textContent.includes(trumpSelector.name)) {
-          playerItems[i].classList.add('trump-selector');
-          break;
-        }
-      }
-    }
-  }
-}
+function updateKickPlayerControls(state, currentPlayer) {
+  if (!kickPlayerControls || !kickVoteStatus) return;
 
-// Modified updateGuessButtons to show clearer who's guessing
-function updateGuessButtons(state) {
-  guessButtons.innerHTML = '';
-  const currentPlayer = state.players.find(p => p.id === currentPlayerId);
-  const currentGuesser = state.players[state.guessingCursor];
-  const isMyTurn = currentGuesser && currentGuesser.id === currentPlayerId;
-  
-  // Add info text about who is guessing
-  if (!isMyTurn && currentGuesser) {
-    const waitingDiv = document.createElement('div');
-    waitingDiv.className = 'waiting-info';
-    waitingDiv.innerHTML = `<p>⏳ Waiting for <strong>${currentGuesser.name}</strong> to guess...</p>`;
-    waitingDiv.style.padding = '10px';
-    waitingDiv.style.background = '#0f3460';
-    waitingDiv.style.borderRadius = '5px';
-    waitingDiv.style.textAlign = 'center';
-    guessButtons.appendChild(waitingDiv);
+  const kickStatus = state.kickVoteStatus || { active: false, votes: {}, yesCount: 0, noCount: 0, threshold: 0, canHostKick: false };
+  const isHost = state.host === currentPlayerId;
+  const isConnected = currentPlayer && currentPlayer.connected;
+  const canShow = isConnected && state.phase !== 'ended' && state.phase !== 'lobby' && (isHost || kickStatus.active);
+
+  if (!canShow) {
+    kickPlayerControls.style.display = 'none';
+    return;
   }
-  
-  if (isMyTurn && currentPlayer.guess === null) {
-    const guessInfo = document.createElement('p');
-    guessInfo.textContent = `How many tricks will you win? (0-${state.cardsThisRound})`;
-    guessInfo.style.marginBottom = '10px';
-    guessInfo.style.fontWeight = 'bold';
-    guessButtons.appendChild(guessInfo);
-    
-    for (let i = 0; i <= state.cardsThisRound; i++) {
-      const btn = document.createElement('button');
-      btn.className = 'guess-btn';
-      btn.textContent = i;
-      btn.addEventListener('click', () => {
-        socket.emit('submit_guess', { guess: i }, (response) => {
-          if (response && response.error) {
-            showError(response.error);
-          }
-        });
+
+  kickPlayerControls.style.display = 'block';
+
+  if (kickStatus.active) {
+    if (kickStartRow) kickStartRow.style.display = 'none';
+    if (kickVotePanel) kickVotePanel.style.display = 'block';
+
+    const votes = kickStatus.votes || {};
+    const myVote = votes[currentPlayerId];
+    const isTarget = kickStatus.targetPlayerId === currentPlayerId;
+    const remainingYesVotes = Math.max(0, kickStatus.threshold - kickStatus.yesCount);
+
+    let myVoteText = 'You have not voted yet';
+    if (isTarget) {
+      myVoteText = 'You are the target, so you cannot vote';
+    } else if (myVote === true) {
+      myVoteText = 'Your vote: Yes';
+    } else if (myVote === false) {
+      myVoteText = 'Your vote: No';
+    }
+
+    kickVoteStatus.textContent = `Kick vote for ${kickStatus.targetPlayerName}: Yes votes ${kickStatus.yesCount}/${kickStatus.threshold} needed. No votes: ${kickStatus.noCount}. ${myVoteText}.`;
+
+    if (kickVoteYes) {
+      kickVoteYes.style.display = isTarget ? 'none' : 'inline-block';
+      kickVoteYes.textContent = myVote === true ? 'Voted Yes' : 'Vote Yes';
+    }
+    if (kickVoteNo) {
+      kickVoteNo.style.display = isTarget ? 'none' : 'inline-block';
+      kickVoteNo.textContent = myVote === false ? 'Voted No' : 'Vote No';
+    }
+    if (cancelKickVoteBtn) {
+      cancelKickVoteBtn.style.display = isHost ? 'inline-block' : 'none';
+    }
+    if (kickPlayerBtn) {
+      kickPlayerBtn.style.display = isHost ? 'inline-block' : 'none';
+      kickPlayerBtn.disabled = !kickStatus.canHostKick;
+      kickPlayerBtn.textContent = kickStatus.canHostKick
+        ? `Kick ${kickStatus.targetPlayerName}`
+        : `Kick Locked (${remainingYesVotes} more yes)`;
+    }
+
+    return;
+  }
+
+  if (kickVotePanel) kickVotePanel.style.display = 'none';
+
+  if (isHost) {
+    if (kickStartRow) kickStartRow.style.display = 'flex';
+    if (kickPlayerSelect) {
+      const previousValue = kickPlayerSelect.value;
+      const kickablePlayers = state.players.filter(p => p.id !== state.host);
+      kickPlayerSelect.innerHTML = '';
+
+      kickablePlayers.forEach(player => {
+        const option = document.createElement('option');
+        option.value = player.id;
+        option.textContent = `${player.name}${player.connected ? '' : ' (disconnected)'}`;
+        kickPlayerSelect.appendChild(option);
       });
-      guessButtons.appendChild(btn);
+
+      if (kickablePlayers.some(p => p.id === previousValue)) {
+        kickPlayerSelect.value = previousValue;
+      }
+
+      if (startKickVoteBtn) {
+        startKickVoteBtn.disabled = kickablePlayers.length === 0;
+      }
     }
-  } else if (isMyTurn && currentPlayer.guess !== null) {
-    guessButtons.innerHTML = '<p>✅ You have already guessed!</p>';
-  } else if (!isMyTurn && !currentGuesser) {
-    guessButtons.innerHTML = '<p>Waiting for guesses...</p>';
+  } else if (kickStartRow) {
+    kickStartRow.style.display = 'none';
   }
 }
 
-// Also update the guesses list to show current guesser
-function updateGuessesList(state) {
-  if (!guessesList) return;
-  
-  let html = '';
-  
-  state.players.forEach(player => {
-    const isCurrentGuesser = state.phase === 'guessing' && state.guessingCursor !== null && 
-                            state.players[state.guessingCursor] && 
-                            state.players[state.guessingCursor].id === player.id;
-    
-    const guessText = player.guess !== null ? player.guess : '?';
-    const guessClass = player.guess !== null ? '' : 'waiting';
-    const currentMarker = isCurrentGuesser ? ' 🎯' : '';
-    
-    html += `<div class="guess-item ${guessClass}">
-      ${player.name}: ${guessText}${currentMarker}
-    </div>`;
-  });
-  
-  guessesList.innerHTML = html;
+function updateRestartRoundControls(state, currentPlayer) {
+  if (!restartRoundControls || !restartVoteStatus) return;
+
+  const roundInProgress = ['guessing', 'trump_select', 'playing'].includes(state.phase);
+  if (!roundInProgress || !currentPlayer || !currentPlayer.connected) {
+    restartRoundControls.style.display = 'none';
+    return;
+  }
+
+  restartRoundControls.style.display = 'block';
+
+  const voteStatus = state.restartVoteStatus || {
+    yesCount: 0,
+    noCount: 0,
+    totalEligible: 0,
+    threshold: 0,
+    canHostRestart: false,
+    votes: {}
+  };
+
+  const votes = voteStatus.votes || {};
+  const myVote = votes[currentPlayerId];
+  const remainingYesVotes = Math.max(0, voteStatus.threshold - voteStatus.yesCount);
+  const myVoteText = myVote === true
+    ? 'Your vote: Yes'
+    : myVote === false
+      ? 'Your vote: No'
+      : 'You have not voted yet';
+
+  restartVoteStatus.textContent = `Yes votes: ${voteStatus.yesCount}/${voteStatus.threshold} needed. No votes: ${voteStatus.noCount}. ${myVoteText}.`;
+
+  if (restartVoteYes) {
+    restartVoteYes.textContent = myVote === true ? 'Voted Yes' : 'Vote Yes';
+  }
+  if (restartVoteNo) {
+    restartVoteNo.textContent = myVote === false ? 'Voted No' : 'Vote No';
+  }
+
+  if (restartRoundBtn) {
+    const isHost = state.host === currentPlayerId;
+    restartRoundBtn.style.display = isHost ? 'inline-block' : 'none';
+    restartRoundBtn.disabled = !voteStatus.canHostRestart;
+    restartRoundBtn.textContent = voteStatus.canHostRestart
+      ? 'Restart Round + Redistribute Cards'
+      : `Host Restart Locked (${remainingYesVotes} more yes)`;
+  }
 }
 
 function updateReadyStatus(state) {
@@ -466,7 +1047,8 @@ function updateReadyStatus(state) {
 function updateGuessesList(state) {
   if (!guessesList) return;
   
-  const playersWithGuesses = state.players.filter(p => p.guess !== null);
+  const roundPlayers = state.players.filter(p => p.activeInRound);
+  const playersWithGuesses = roundPlayers.filter(p => p.guess !== null);
   
   if (playersWithGuesses.length === 0) {
     guessesList.innerHTML = '<div class="guess-item waiting">Waiting for guesses...</div>';
@@ -476,7 +1058,7 @@ function updateGuessesList(state) {
   let html = '';
   
   // Sort players by guess submission order (or just show all with guesses)
-  state.players.forEach(player => {
+  roundPlayers.forEach(player => {
     if (player.guess !== null) {
       html += `<div class="guess-item">${player.name}: ${player.guess}</div>`;
     } else {
@@ -511,7 +1093,7 @@ function updateEndedScreen(state) {
   sortedPlayers.forEach(player => {
     html += `<tr><td>${player.name}</td>`;
     for (let i = 0; i < maxRounds; i++) {
-      html += `<td>${player.roundScores[i] !== undefined ? player.roundScores[i] : '-'}</td>`;
+      html += `<td>${player.roundScores[i] !== undefined && player.roundScores[i] !== null ? player.roundScores[i] : '-'}</td>`;
     }
     html += `<td>${player.total}</td></tr>`;
   });
@@ -537,9 +1119,9 @@ function updateEndedScreen(state) {
 function updateGuessButtons(state) {
   guessButtons.innerHTML = '';
   const currentPlayer = state.players.find(p => p.id === currentPlayerId);
-  const isMyTurn = state.players[state.guessingCursor]?.id === currentPlayerId;
+  const isMyTurn = state.guessingPlayerId === currentPlayerId;
   
-  if (isMyTurn && currentPlayer.guess === null) {
+  if (isMyTurn && currentPlayer && currentPlayer.guess === null) {
     for (let i = 0; i <= state.cardsThisRound; i++) {
       const btn = document.createElement('button');
       btn.className = 'guess-btn';
@@ -601,7 +1183,8 @@ function updateScoreboard(state) {
   state.players.forEach(player => {
     html += `<tr><td>${player.name}</td>`;
     for (let i = 0; i < maxRounds; i++) {
-      html += `<td>${player.roundScores[i] || '-'}</td>`;
+      const score = player.roundScores[i];
+      html += `<td>${score !== undefined && score !== null ? score : '-'}</td>`;
     }
     html += `<td>${player.total}</td></tr>`;
   });
@@ -618,24 +1201,6 @@ function getSuitSymbol(suit) {
     'spades': '♠'
   };
   return symbols[suit] || suit;
-}
-
-// Add after the getSuitSymbol function (around line 324)
-function sortCards(cards) {
-  const suitOrder = { 'clubs': 0, 'hearts': 1, 'spades': 2, 'diamonds': 3 };
-  const rankOrder = {
-    '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8,
-    '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14
-  };
-
-  return [...cards].sort((a, b) => {
-    // First sort by suit
-    if (suitOrder[a.suit] !== suitOrder[b.suit]) {
-      return suitOrder[a.suit] - suitOrder[b.suit];
-    }
-    // Then sort by rank within the same suit
-    return rankOrder[a.rank] - rankOrder[b.rank];
-  });
 }
 
 // Add element reference

@@ -1,47 +1,65 @@
 function registerHandlers(io, socket, gameManager) {
-  
+  const getStablePlayerId = () => gameManager.getPlayerIdForSocket(socket.id);
+
+  function leaveCurrentRoomIfAny() {
+    const existingRoom = gameManager.getRoomForPlayer(socket.id);
+    if (!existingRoom) return;
+
+    const oldGame = gameManager.getGame(existingRoom);
+    const playerId = getStablePlayerId();
+
+    if (oldGame) {
+      const result = oldGame.leavePlayerVoluntarily(playerId);
+      if (result.player?.sessionToken) {
+        gameManager.deleteSession(result.player.sessionToken);
+      }
+
+      socket.leave(existingRoom);
+      gameManager.removeSocketMappings(socket.id);
+
+      if (oldGame.players.length === 0 || result.roomEmpty) {
+        gameManager.games.delete(existingRoom);
+      } else {
+        broadcastGameState(io, existingRoom, oldGame, gameManager);
+      }
+    } else {
+      gameManager.removeSocketMappings(socket.id);
+    }
+  }
+
   socket.on('create_room', (data, callback) => {
     try {
-      const existingRoom = gameManager.getRoomForPlayer(socket.id);
-      if (existingRoom) {
-        const oldGame = gameManager.getGame(existingRoom);
-        if (oldGame) {
-          oldGame.removePlayer(socket.id);
-          socket.leave(existingRoom);
-          
-          if (oldGame.players.length === 0) {
-            gameManager.games.delete(existingRoom);
-          } else {
-            broadcastGameState(io, existingRoom, oldGame);
-          }
-        }
-        gameManager.playerToRoom.delete(socket.id);
-      }
-      
+      leaveCurrentRoomIfAny();
+
       const customX = data.customX || null;
       const game = gameManager.createGame(customX);
       const roomCode = game.roomCode;
-      
+      const playerId = socket.id;
+      const sessionToken = gameManager.createSession(roomCode, playerId, data.username);
+
       socket.join(roomCode);
-      gameManager.addPlayerToRoom(socket.id, roomCode);
-      
-      const result = game.addPlayer(socket.id, data.username);
+      gameManager.addPlayerToRoom(socket.id, roomCode, playerId);
+
+      const result = game.addPlayer(playerId, data.username, sessionToken);
       if (result.error) {
+        gameManager.deleteSession(sessionToken);
         if (callback && typeof callback === 'function') {
           callback({ error: result.error });
         }
         return;
       }
-      
+
       if (callback && typeof callback === 'function') {
-        callback({ 
-          success: true, 
+        callback({
+          success: true,
           roomCode,
-          gameState: game.getState(socket.id)
+          playerId,
+          sessionToken,
+          gameState: game.getState(playerId)
         });
       }
-      
-      broadcastGameState(io, roomCode, game);
+
+      broadcastGameState(io, roomCode, game, gameManager);
     } catch (error) {
       if (callback && typeof callback === 'function') {
         callback({ error: error.message });
@@ -51,24 +69,11 @@ function registerHandlers(io, socket, gameManager) {
 
   socket.on('join_room', (data, callback) => {
     try {
-      const existingRoom = gameManager.getRoomForPlayer(socket.id);
-      if (existingRoom) {
-        const oldGame = gameManager.getGame(existingRoom);
-        if (oldGame) {
-          oldGame.removePlayer(socket.id);
-          socket.leave(existingRoom);
-          
-          if (oldGame.players.length === 0) {
-            gameManager.games.delete(existingRoom);
-          } else {
-            broadcastGameState(io, existingRoom, oldGame);
-          }
-        }
-        gameManager.playerToRoom.delete(socket.id);
-      }
-      
-      const game = gameManager.getGame(data.roomCode);
-      
+      leaveCurrentRoomIfAny();
+
+      const roomCode = (data.roomCode || '').toUpperCase();
+      const game = gameManager.getGame(roomCode);
+
       if (!game) {
         if (callback && typeof callback === 'function') {
           callback({ error: 'Room not found' });
@@ -76,32 +81,35 @@ function registerHandlers(io, socket, gameManager) {
         return;
       }
 
-      if (game.phase !== 'lobby' && game.phase !== 'vote' && game.phase !== 'ended') {
-        if (callback && typeof callback === 'function') {
-          callback({ error: 'Game already in progress' });
-        }
-        return;
-      }
+      const playerId = socket.id;
+      const sessionToken = gameManager.createSession(roomCode, playerId, data.username);
 
-      socket.join(data.roomCode);
-      gameManager.addPlayerToRoom(socket.id, data.roomCode);
-      
-      const result = game.addPlayer(socket.id, data.username);
+      socket.join(roomCode);
+      gameManager.addPlayerToRoom(socket.id, roomCode, playerId);
+
+      const result = game.addPlayer(playerId, data.username, sessionToken);
       if (result.error) {
+        socket.leave(roomCode);
+        gameManager.removeSocketMappings(socket.id);
+        gameManager.deleteSession(sessionToken);
         if (callback && typeof callback === 'function') {
           callback({ error: result.error });
         }
         return;
       }
-      
+
       if (callback && typeof callback === 'function') {
-        callback({ 
+        callback({
           success: true,
-          gameState: game.getState(socket.id)
+          roomCode,
+          playerId,
+          sessionToken,
+          joinsNextRound: result.joinsNextRound,
+          gameState: game.getState(playerId)
         });
       }
-      
-      broadcastGameState(io, data.roomCode, game);
+
+      broadcastGameState(io, roomCode, game, gameManager);
     } catch (error) {
       if (callback && typeof callback === 'function') {
         callback({ error: error.message });
@@ -109,37 +117,33 @@ function registerHandlers(io, socket, gameManager) {
     }
   });
 
-  // New reconnection handler
-  socket.on('reconnect_game', (data, callback) => {
-    const { roomCode, username } = data;
-    
-    if (!roomCode || !username) {
-      if (callback) callback({ error: 'Missing room code or username' });
-      return;
+  socket.on('rejoin_session', (data, callback) => {
+    try {
+      leaveCurrentRoomIfAny();
+
+      const result = gameManager.rejoinSession(data.sessionToken, socket.id);
+      if (result.error) {
+        if (callback && typeof callback === 'function') callback({ error: result.error });
+        return;
+      }
+
+      socket.join(result.roomCode);
+
+      if (callback && typeof callback === 'function') {
+        callback({
+          success: true,
+          roomCode: result.roomCode,
+          playerId: result.playerId,
+          username: result.username,
+          sessionToken: data.sessionToken,
+          gameState: result.game.getState(result.playerId)
+        });
+      }
+
+      broadcastGameState(io, result.roomCode, result.game, gameManager);
+    } catch (error) {
+      if (callback && typeof callback === 'function') callback({ error: error.message });
     }
-    
-    const game = gameManager.getGame(roomCode);
-    if (!game) {
-      if (callback) callback({ error: 'Game not found' });
-      return;
-    }
-    
-    const result = game.reconnectPlayer(null, socket.id, username);
-    
-    if (result.error) {
-      if (callback) callback(result);
-      return;
-    }
-    
-    gameManager.addPlayerToRoom(socket.id, roomCode);
-    socket.join(roomCode);
-    
-    if (callback) callback({ 
-      success: true, 
-      gameState: game.getState(socket.id) 
-    });
-    
-    broadcastGameState(io, roomCode, game);
   });
 
   socket.on('start_game', (callback) => {
@@ -152,28 +156,26 @@ function registerHandlers(io, socket, gameManager) {
     }
 
     const game = gameManager.getGame(roomCode);
-    
-    if (game.host !== socket.id) {
+    const playerId = getStablePlayerId();
+
+    if (game.host !== playerId) {
       if (callback && typeof callback === 'function') {
         callback({ error: 'Only host can start the game' });
       }
       return;
     }
 
-    if (game.players.length < 2) {
-      if (callback && typeof callback === 'function') {
-        callback({ error: 'Need at least 2 players' });
-      }
+    const result = game.startNewRound();
+    if (result.error) {
+      if (callback && typeof callback === 'function') callback(result);
       return;
     }
 
-    game.startNewRound();
-    
     if (callback && typeof callback === 'function') {
       callback({ success: true });
     }
-    
-    broadcastGameState(io, roomCode, game);
+
+    broadcastGameState(io, roomCode, game, gameManager);
   });
 
   socket.on('submit_guess', (data, callback) => {
@@ -184,15 +186,15 @@ function registerHandlers(io, socket, gameManager) {
     }
 
     const game = gameManager.getGame(roomCode);
-    const result = game.submitGuess(socket.id, data.guess);
-    
+    const result = game.submitGuess(getStablePlayerId(), data.guess);
+
     if (result.error) {
       if (callback) callback(result);
       return;
     }
-    
+
     if (callback) callback({ success: true });
-    broadcastGameState(io, roomCode, game);
+    broadcastGameState(io, roomCode, game, gameManager);
   });
 
   socket.on('select_trump', (data, callback) => {
@@ -203,15 +205,15 @@ function registerHandlers(io, socket, gameManager) {
     }
 
     const game = gameManager.getGame(roomCode);
-    const result = game.selectTrump(socket.id, data.trump);
-    
+    const result = game.selectTrump(getStablePlayerId(), data.trump);
+
     if (result.error) {
       if (callback) callback(result);
       return;
     }
-    
+
     if (callback) callback({ success: true });
-    broadcastGameState(io, roomCode, game);
+    broadcastGameState(io, roomCode, game, gameManager);
   });
 
   socket.on('play_card', (data, callback) => {
@@ -222,20 +224,20 @@ function registerHandlers(io, socket, gameManager) {
     }
 
     const game = gameManager.getGame(roomCode);
-    const result = game.playCard(socket.id, data.card);
-    
+    const result = game.playCard(getStablePlayerId(), data.card);
+
     if (result.error) {
       if (callback) callback(result);
       return;
     }
-    
+
     if (callback) callback({ success: true });
-    
-    broadcastGameState(io, roomCode, game);
-    
+
+    broadcastGameState(io, roomCode, game, gameManager);
+
     if (game.completedTrick) {
       setTimeout(() => {
-        broadcastGameState(io, roomCode, game);
+        broadcastGameState(io, roomCode, game, gameManager);
       }, 1500);
     }
   });
@@ -248,15 +250,216 @@ function registerHandlers(io, socket, gameManager) {
     }
 
     const game = gameManager.getGame(roomCode);
-    const result = game.castContinueVote(socket.id, data.continue);
-    
+    const result = game.castContinueVote(getStablePlayerId(), data.continue);
+
     if (result.error) {
       if (callback) callback(result);
       return;
     }
-    
+
     if (callback) callback({ success: true });
-    broadcastGameState(io, roomCode, game);
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('restart_round_vote', (data, callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    const result = game.castRestartVote(getStablePlayerId(), data.restart);
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (callback) callback({ success: true });
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('restart_round', (callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    const result = game.restartCurrentRound(getStablePlayerId());
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (callback) callback({ success: true });
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('end_game_vote', (data, callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    const result = game.castEndGameVote(getStablePlayerId(), data.endGame);
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (callback) callback({ success: true });
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('end_game', (callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    const result = game.endGame(getStablePlayerId());
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (callback) callback({ success: true });
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('start_kick_vote', (data, callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    const result = game.startKickVote(getStablePlayerId(), data.targetPlayerId);
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (callback) callback({ success: true });
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('kick_vote', (data, callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    const result = game.castKickVote(getStablePlayerId(), data.kick);
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (callback) callback({ success: true });
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('cancel_kick_vote', (callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    const result = game.cancelKickVote(getStablePlayerId());
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (callback) callback({ success: true });
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('kick_player', (callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    const result = game.kickVotedPlayer(getStablePlayerId());
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (result.player?.sessionToken) {
+      gameManager.deleteSession(result.player.sessionToken);
+    }
+
+    removeKickedPlayerSockets(io, roomCode, gameManager, result.player?.id, result.player?.name);
+
+    if (callback) callback({ success: true });
+    broadcastGameState(io, roomCode, game, gameManager);
+  });
+
+  socket.on('leave_room', (callback) => {
+    const roomCode = gameManager.getRoomForPlayer(socket.id);
+    if (!roomCode) {
+      if (callback) callback({ error: 'Not in a room' });
+      return;
+    }
+
+    const game = gameManager.getGame(roomCode);
+    if (!game) {
+      gameManager.removeSocketMappings(socket.id);
+      if (callback) callback({ success: true });
+      return;
+    }
+
+    const playerId = getStablePlayerId();
+    const result = game.leavePlayerVoluntarily(playerId);
+
+    if (result.error) {
+      if (callback) callback(result);
+      return;
+    }
+
+    if (result.player?.sessionToken) {
+      gameManager.deleteSession(result.player.sessionToken);
+    }
+
+    socket.leave(roomCode);
+    gameManager.removeSocketMappings(socket.id);
+
+    if (callback) callback({ success: true });
+
+    socket.emit('left_room', {
+      roomCode,
+      message: 'You left the room.'
+    });
+
+    if (game.players.length === 0 || result.roomEmpty) {
+      gameManager.games.delete(roomCode);
+    } else {
+      broadcastGameState(io, roomCode, game, gameManager);
+    }
   });
 
   socket.on('ready_next_round', (callback) => {
@@ -267,15 +470,15 @@ function registerHandlers(io, socket, gameManager) {
     }
 
     const game = gameManager.getGame(roomCode);
-    const result = game.readyForNextRound(socket.id);
-    
+    const result = game.readyForNextRound(getStablePlayerId());
+
     if (result.error) {
       if (callback) callback(result);
       return;
     }
-    
+
     if (callback) callback({ success: true });
-    broadcastGameState(io, roomCode, game);
+    broadcastGameState(io, roomCode, game, gameManager);
   });
 
   socket.on('new_game', (data, callback) => {
@@ -286,39 +489,58 @@ function registerHandlers(io, socket, gameManager) {
     }
 
     const game = gameManager.getGame(roomCode);
-    
-    if (game.host !== socket.id) {
+    const playerId = getStablePlayerId();
+
+    if (game.host !== playerId) {
       if (callback) callback({ error: 'Only host can start a new game' });
       return;
     }
-    
+
     if (data && data.customX) {
       game.customX = data.customX;
     }
-    
+
     game.returnToLobby();
-    
+
     if (callback) callback({ success: true });
-    broadcastGameState(io, roomCode, game);
+    broadcastGameState(io, roomCode, game, gameManager);
   });
-
-  // Track heartbeat
-  socket.on('ping', () => {
-    socket.emit('pong');
-  });
-
 }
 
-function broadcastGameState(io, roomCode, game) {
+function broadcastGameState(io, roomCode, game, gameManager) {
   const sockets = io.sockets.adapter.rooms.get(roomCode);
   if (sockets) {
     sockets.forEach(socketId => {
       const socket = io.sockets.sockets.get(socketId);
       if (socket) {
-        socket.emit('game_state', game.getState(socketId));
+        const playerId = gameManager.getPlayerIdForSocket(socketId);
+        socket.emit('game_state', game.getState(playerId));
       }
     });
   }
 }
 
-module.exports = { registerHandlers };
+
+function removeKickedPlayerSockets(io, roomCode, gameManager, playerId, playerName = 'A player') {
+  if (!playerId) return;
+
+  const sockets = io.sockets.adapter.rooms.get(roomCode);
+  if (!sockets) return;
+
+  Array.from(sockets).forEach(socketId => {
+    if (gameManager.getPlayerIdForSocket(socketId) !== playerId) return;
+
+    const playerSocket = io.sockets.sockets.get(socketId);
+    if (playerSocket) {
+      playerSocket.emit('kicked_from_room', {
+        roomCode,
+        message: 'You were kicked from the room.'
+      });
+      playerSocket.leave(roomCode);
+    }
+
+    gameManager.removeSocketMappings(socketId);
+  });
+}
+
+module.exports = { registerHandlers, broadcastGameState };

@@ -34,11 +34,12 @@
         <div class="create-section">
           <label for="max-cards-input">Max Cards per Round:</label>
           <div class="create-row">
-            <input type="number" id="max-cards-input" min="1" max="13" placeholder="(optional)">
+            <input type="number" id="max-cards-input" min="1" max="26" placeholder="(optional)">
             <button id="create-room-btn">Create New Room</button>
           </div>
         </div>
       </div>
+      <div id="lobby-error-message" class="error"></div>
     </div>
 
     <!-- Game Screen -->
@@ -50,12 +51,69 @@
         <div class="phase-info">
           Phase: <span id="phase-display"></span>
         </div>
+        <button id="game-actions-toggle" class="game-actions-toggle" type="button" style="display: none;">☰ Game Options</button>
       </div>
 
-      <div class="players-container">
-        <h3>Players</h3>
-        <div id="players-list"></div>
-      </div>
+      <div id="game-actions-overlay" class="game-actions-overlay"></div>
+      <aside id="game-actions-sidebar" class="game-actions-sidebar" aria-hidden="true">
+        <div class="game-actions-sidebar-header">
+          <h3>Game Options</h3>
+          <button id="game-actions-close" class="game-actions-close" type="button" aria-label="Close game options">×</button>
+        </div>
+        <div class="game-actions-sidebar-note">
+          Leave-room, restart, kick, and end-game controls live here so the table stays clean while playing.
+        </div>
+
+        <div class="sidebar-leave-section">
+          <button id="leave-room-btn" class="sidebar-leave-btn" style="display: none;">Leave Room</button>
+          <div id="leave-room-confirm" class="leave-room-confirm" style="display: none;">
+            <div class="leave-room-confirm-text">
+              Are you sure you want to leave this room? Your seat will be removed from the game.
+            </div>
+            <div class="leave-room-confirm-buttons">
+              <button id="confirm-leave-room-btn">Confirm Leave</button>
+              <button id="back-to-game-btn">Back to Game</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="end-game-vote-controls" class="end-game-vote-controls" style="display: none;">
+          <h4>End Game?</h4>
+          <div id="end-game-vote-status" class="end-game-vote-status"></div>
+          <div class="end-game-vote-buttons">
+            <button id="end-game-vote-yes">Vote Yes</button>
+            <button id="end-game-vote-no">Vote No</button>
+            <button id="end-game-btn" style="display: none;">End Game</button>
+          </div>
+        </div>
+
+        <div id="kick-player-controls" class="kick-player-controls" style="display: none;">
+          <h4>Kick Player</h4>
+          <div id="kick-start-row" class="kick-start-row" style="display: none;">
+            <select id="kick-player-select"></select>
+            <button id="start-kick-vote-btn">Start Kick Vote</button>
+          </div>
+          <div id="kick-vote-panel" class="kick-vote-panel" style="display: none;">
+            <div id="kick-vote-status" class="kick-vote-status"></div>
+            <div class="kick-vote-buttons">
+              <button id="kick-vote-yes">Vote Yes</button>
+              <button id="kick-vote-no">Vote No</button>
+              <button id="cancel-kick-vote-btn" style="display: none;">Cancel Vote</button>
+              <button id="kick-player-btn" style="display: none;">Kick Player</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="restart-round-controls" class="restart-round-controls" style="display: none;">
+          <h4>Restart Current Round?</h4>
+          <div id="restart-vote-status" class="restart-vote-status"></div>
+          <div class="restart-vote-buttons">
+            <button id="restart-vote-yes">Vote Yes</button>
+            <button id="restart-vote-no">Vote No</button>
+            <button id="restart-round-btn" style="display: none;">Restart Round</button>
+          </div>
+        </div>
+      </aside>
 
       <div class="game-controls">
         <button id="start-game-btn" style="display: none;">Start Game</button>
@@ -67,21 +125,20 @@
         <div id="scoreboard"></div>
       </div>
 
+      <div class="players-container">
+        <h3>Players</h3>
+        <div id="players-list"></div>
+      </div>
+
       <!-- Game Play Area -->
       <div id="game-play-area" style="display: none;">
-        <!-- Add this in game-play-area, after round-info -->
-        <div id="guesses-display" class="guesses-display" style="display: none;">
-          <h4>Round Guesses</h4>
-          <div id="guesses-list"></div>
-        </div>
-        
         <div class="round-info">
           <h3>Round <span id="round-number"></span></h3>
           <p>Cards this round: <span id="cards-this-round"></span></p>
-          <div class="trump-info">
-            <p>Trump: <span id="trump-display"></span></p>
-          </div>
+          <p>Trump: <span id="trump-display"></span></p>
         </div>
+
+        <div id="waiting-next-round" class="waiting-next-round" style="display: none;"></div>
 
         <div id="turn-indicator" class="turn-indicator"></div>
         <div id="trick-winner-display" class="trick-winner" style="display: none;"></div>
@@ -136,9 +193,6 @@
       </div>
 
       <div id="error-message" class="error"></div>
-      <div id="reconnecting-indicator" style="display: none; position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: #FFA500; color: #1a1a2e; padding: 10px 20px; border-radius: 5px; z-index: 1000; font-weight: bold;">
-        🔄 Connection lost - Reconnecting...
-      </div>
     </div>
   </div>
 
